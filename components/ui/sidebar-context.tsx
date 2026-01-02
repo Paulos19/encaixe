@@ -1,28 +1,44 @@
-'use client';
+"use client";
 
-import React, { createContext, useContext, useState } from 'react';
+import React, { createContext, useContext, useState, useEffect } from "react";
 
-type SidebarContextType = {
-  expanded: boolean;
-  toggle: () => void;
-};
+interface SidebarContextType {
+  isCollapsed: boolean;
+  toggleSidebar: () => void;
+  isMobile: boolean;
+}
 
 const SidebarContext = createContext<SidebarContextType | undefined>(undefined);
 
 export function SidebarProvider({ children }: { children: React.ReactNode }) {
-  const [expanded, setExpanded] = useState(true);
+  const [isCollapsed, setIsCollapsed] = useState(false);
+  const [isMobile, setIsMobile] = useState(false);
 
-  const toggle = () => setExpanded((curr) => !curr);
+  // Detectar mobile e auto-colapsar
+  useEffect(() => {
+    const checkScreenSize = () => {
+      setIsMobile(window.innerWidth < 768);
+      if (window.innerWidth < 768) {
+        setIsCollapsed(true);
+      }
+    };
+
+    checkScreenSize();
+    window.addEventListener("resize", checkScreenSize);
+    return () => window.removeEventListener("resize", checkScreenSize);
+  }, []);
+
+  const toggleSidebar = () => setIsCollapsed(!isCollapsed);
 
   return (
-    <SidebarContext.Provider value={{ expanded, toggle }}>
+    <SidebarContext.Provider value={{ isCollapsed, toggleSidebar, isMobile }}>
       {children}
     </SidebarContext.Provider>
   );
 }
 
-export function useSidebar() {
+export const useSidebar = () => {
   const context = useContext(SidebarContext);
   if (!context) throw new Error("useSidebar must be used within a SidebarProvider");
   return context;
-}
+};

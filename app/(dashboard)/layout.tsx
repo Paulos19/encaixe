@@ -16,23 +16,27 @@ export default async function DashboardLayout({
     redirect("/login");
   }
 
+  // Garante tipagem segura e fallback para o role
   const user = {
     ...session.user,
-    role: session.user.role || "MANAGER"
+    role: session.user.role || "USER", // Mudei fallback para USER por segurança, ajuste conforme sua regra
   };
 
   return (
     <SidebarProvider>
-      <div className="flex min-h-screen w-full bg-zinc-50 dark:bg-black">
-        {/* A Sidebar consome o contexto internamente */}
+      <div className="relative flex min-h-screen w-full bg-zinc-50 dark:bg-zinc-950 overflow-hidden">
+        {/* Sidebar Fixa à esquerda */}
         <Sidebar userRole={user.role} />
-        
-        {/* O Wrapper ajusta a margem baseado no contexto */}
+
+        {/* Wrapper que controla a margem esquerda e a área de conteúdo */}
         <DashboardWrapper>
           <Header user={user} />
-          <div className="flex-1 p-6 md:p-8 pt-6 max-w-7xl mx-auto w-full animate-in fade-in-50 slide-in-from-bottom-2 duration-500">
-            {children}
-          </div>
+          
+          <main className="flex-1 overflow-y-auto p-4 md:p-8 scroll-smooth">
+            <div className="mx-auto w-full max-w-7xl animate-in fade-in-50 slide-in-from-bottom-2 duration-500">
+              {children}
+            </div>
+          </main>
         </DashboardWrapper>
       </div>
     </SidebarProvider>

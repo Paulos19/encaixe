@@ -1,23 +1,23 @@
-'use client';
+"use client";
 
 import { useSidebar } from "@/components/ui/sidebar-context";
 import { cn } from "@/lib/utils";
-import { motion } from "framer-motion";
 
 export function DashboardWrapper({ children }: { children: React.ReactNode }) {
-  const { expanded } = useSidebar();
+  const { isCollapsed, isMobile } = useSidebar();
 
   return (
-    <motion.main
-      initial={false}
-      animate={{ 
-        marginLeft: expanded ? 280 : 80,
-        width: `calc(100% - ${expanded ? 280 : 80}px)`
-      }}
-      transition={{ type: "spring", stiffness: 300, damping: 30 }}
-      className="flex-1 flex flex-col min-h-screen bg-zinc-50/50 dark:bg-zinc-950"
+    <div
+      className={cn(
+        "flex min-h-screen flex-1 flex-col transition-all duration-300 ease-in-out",
+        // Mobile: Sem margem (ml-0)
+        // Desktop: ml-[90px] (fechado) ou ml-72 (aberto)
+        isMobile 
+          ? "ml-0" 
+          : (isCollapsed ? "ml-[90px]" : "ml-72")
+      )}
     >
       {children}
-    </motion.main>
+    </div>
   );
 }
