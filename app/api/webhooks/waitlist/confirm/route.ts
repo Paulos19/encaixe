@@ -2,7 +2,6 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { z } from 'zod';
 
-// Validação do Payload que vem do n8n
 const ConfirmSchema = z.object({
   waitlistId: z.string().cuid(),
   patientId: z.string().cuid(),
@@ -10,7 +9,7 @@ const ConfirmSchema = z.object({
 
 export async function POST(request: Request) {
   try {
-    // 1. Verificação de Segurança (API Key)
+    // 1. Segurança
     const apiKey = request.headers.get('x-api-secret');
     if (apiKey !== process.env.N8N_API_SECRET) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -25,35 +24,46 @@ export async function POST(request: Request) {
 
     const { waitlistId, patientId } = validated.data;
 
-    // 2. Transação Atômica (O Juiz)
+    // 2. Transação com Verificação de Estado Granular
     const result = await prisma.$transaction(async (tx) => {
-      // Passo A: Verifica se a lista ainda está ativa/vazia
-      // (Assumindo que uma Lista de Espera ativa busca preencher 1 vaga imediata)
-      // Se já houver ALGUÉM confirmado nesta lista recentemente (ex: hoje), bloqueia.
-      
-      const alreadyFilled = await tx.waitlistEntry.findFirst({
-        where: {
-          waitlistId: waitlistId,
-          status: 'CONFIRMED',
-          // Opcional: Adicionar filtro de data se a lista for reutilizável
-          // updatedAt: { gte: startOfToday() } 
-        }
-      });
-
-      if (alreadyFilled) {
-        throw new Error('VAGA_OCUPADA');
-      }
-
-      // Passo B: Verifica se o paciente realmente estava na fila
+      // A. Busca a entrada específica do paciente
       const entry = await tx.waitlistEntry.findFirst({
         where: { waitlistId, patientId }
       });
 
       if (!entry) {
-        throw new Error('PACIENTE_NAO_ENCONTRADO');
+        throw new Error('NOT_FOUND');
       }
 
-      // Passo C: Efetiva a confirmação
+      // B. Verifica o status ATUAL do paciente
+      if (entry.status === 'CONFIRMED') {
+        // Se já está confirmado, retorna sucesso (Idempotência)
+        return { status: 'ALREADY_DONE', entry };
+      }
+
+      if (entry.status === 'EXPIRED') {
+        throw new Error('EXPIRED'); // Caiu na vassoura
+      }
+
+      if (entry.status === 'DECLINED') {
+        throw new Error('DECLINED'); // Já tinha dito não
+      }
+
+      // C. Verifica Race Condition (Se OUTRA pessoa já pegou a vaga)
+      // Assumindo que a lista só comporta 1 confirmação por vez (vaga única)
+      const winner = await tx.waitlistEntry.findFirst({
+        where: {
+          waitlistId: waitlistId,
+          status: 'CONFIRMED',
+          id: { not: entry.id } // Alguém que não sou eu
+        }
+      });
+
+      if (winner) {
+        throw new Error('TAKEN'); // Perdeu a vaga
+      }
+
+      // D. Tudo limpo? Confirma!
       const updatedEntry = await tx.waitlistEntry.update({
         where: { id: entry.id },
         data: { 
@@ -62,37 +72,47 @@ export async function POST(request: Request) {
         }
       });
 
-      // Passo D (Opcional): Pausa a lista para não notificar mais ninguém
+      // E. Opcional: Pausa a lista
       await tx.waitlist.update({
         where: { id: waitlistId },
         data: { isActive: false }
       });
 
-      return updatedEntry;
+      return { status: 'SUCCESS', entry: updatedEntry };
     });
 
-    // Sucesso Total
-    return NextResponse.json({ 
-      success: true, 
-      message: 'Vaga confirmada com sucesso.',
-      data: result 
-    }, { status: 200 });
+    // 3. Respostas HTTP Inteligentes para o n8n
+    if (result.status === 'ALREADY_DONE') {
+      return NextResponse.json({ success: true, message: 'Você já havia confirmado esta vaga.' }, { status: 200 });
+    }
+
+    return NextResponse.json({ success: true, message: 'Vaga confirmada!' }, { status: 200 });
 
   } catch (error: any) {
-    console.error('Erro na confirmação:', error);
+    console.error('Erro no confirm:', error.message);
 
-    // Tratamento de Erro de Negócio
-    if (error.message === 'VAGA_OCUPADA') {
-      return NextResponse.json({ 
-        success: false, 
-        error: 'Esta vaga acabou de ser preenchida por outra pessoa.' 
-      }, { status: 409 }); // 409 Conflict
+    // Mapeamento de Erros para HTTP Codes
+    switch (error.message) {
+      case 'NOT_FOUND':
+        return NextResponse.json({ error: 'Cadastro não encontrado nesta lista.' }, { status: 404 });
+      
+      case 'EXPIRED':
+        return NextResponse.json({ 
+          error: '⏳ O tempo limite para resposta expirou. Fique atento à próxima oportunidade!' 
+        }, { status: 410 }); // 410 Gone
+      
+      case 'DECLINED':
+        return NextResponse.json({ 
+          error: 'Você já recusou esta oferta anteriormente.' 
+        }, { status: 400 });
+
+      case 'TAKEN':
+        return NextResponse.json({ 
+          error: '⚠️ Poxa, a vaga acabou de ser preenchida por outra pessoa. Te avisaremos da próxima!' 
+        }, { status: 409 }); // 409 Conflict
+
+      default:
+        return NextResponse.json({ error: 'Erro interno ao processar.' }, { status: 500 });
     }
-
-    if (error.message === 'PACIENTE_NAO_ENCONTRADO') {
-      return NextResponse.json({ error: 'Paciente não está na fila.' }, { status: 404 });
-    }
-
-    return NextResponse.json({ error: 'Erro interno do servidor' }, { status: 500 });
   }
 }
