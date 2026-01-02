@@ -1,0 +1,91 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql" // Ou sqlite para dev rápido inicial
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  USER    // Cliente final da clínica (paciente) - se tiver portal futuro
+  MANAGER // Dono da clínica/Funcionário (Cliente do SaaS)
+  ADMIN   // Você (Super Admin do SaaS)
+}
+
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String    @unique
+  password      String?
+  role          Role      @default(MANAGER)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  waitlists     Waitlist[]
+  patients      Patient[]
+}
+
+model Patient {
+  id          String   @id @default(cuid())
+  name        String
+  phone       String   // Essencial para o WhatsApp (Formato E.164 recomendado)
+  email       String?
+  notes       String?  // Obs: "Prefere manhã", "Cliente VIP"
+  
+  managerId   String
+  manager     User     @relation(fields: [managerId], references: [id])
+  
+  entries     WaitlistEntry[]
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Garante que o mesmo médico não cadastre o mesmo telefone 2x
+  @@unique([managerId, phone])
+}
+
+model Waitlist {
+  id          String   @id @default(cuid())
+  name        String   // Ex: "Dermatologia - Dra. Ana", "Cancelamentos Terça"
+  description String?
+  
+  ownerId     String
+  owner       User     @relation(fields: [ownerId], references: [id])
+  
+  entries     WaitlistEntry[]
+  
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model WaitlistEntry {
+  id          String      @id @default(cuid())
+  
+  waitlistId  String
+  waitlist    Waitlist    @relation(fields: [waitlistId], references: [id], onDelete: Cascade)
+  
+  patientId   String
+  patient     Patient     @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  
+  status      EntryStatus @default(WAITING)
+  
+  // Para ordenação manual ou prioridade, se necessário. 
+  // Por padrão usaremos addedAt (FIFO)
+  priority    Int         @default(0) 
+  
+  addedAt     DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  @@index([waitlistId, status])
+}
+
+enum EntryStatus {
+  WAITING     // Aguardando na fila
+  NOTIFIED    // O robô enviou a mensagem
+  CONFIRMED   // Encaixe realizado! (Vencedor)
+  DECLINED    // Paciente recusou
+  EXPIRED     // Tempo esgotou sem resposta
+  CANCELED    // Removido manualmente
+}
