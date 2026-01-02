@@ -32,7 +32,7 @@ interface Patient {
   phone: string;
   createdAt: Date;
   _count: {
-    waitlistEntries: number;
+    entries: number; // <--- CORRIGIDO: mudou de waitlistEntries para entries
   };
 }
 
@@ -43,7 +43,6 @@ interface PatientListProps {
 export function PatientList({ patients: initialPatients }: PatientListProps) {
   const [search, setSearch] = useState('');
   
-  // Filtragem local (Pode ser substituída por Server Search para grandes volumes)
   const filteredPatients = initialPatients.filter(p => 
     p.name.toLowerCase().includes(search.toLowerCase()) ||
     p.phone.includes(search)
@@ -51,9 +50,8 @@ export function PatientList({ patients: initialPatients }: PatientListProps) {
 
   return (
     <div className="space-y-6">
-      {/* --- BARRA DE FERRAMENTAS --- */}
+      {/* ... (Header da Tabela Mantido igual) ... */}
       <div className="flex flex-col md:flex-row gap-4 justify-between items-center">
-        {/* Search Bar Premium */}
         <div className="relative w-full md:w-96 group">
             <div className="absolute inset-0 bg-gradient-to-r from-amber-500/20 to-purple-600/20 rounded-full blur-md opacity-0 group-focus-within:opacity-100 transition-opacity duration-500" />
             <div className="relative">
@@ -77,7 +75,6 @@ export function PatientList({ patients: initialPatients }: PatientListProps) {
         </div>
       </div>
 
-      {/* --- LISTA DE CARDS (Layout Grid para Mobile / Table para Desktop) --- */}
       <PremiumCard className="overflow-hidden p-0 min-h-[400px]">
         <div className="overflow-x-auto">
             <table className="w-full">
@@ -134,7 +131,8 @@ export function PatientList({ patients: initialPatients }: PatientListProps) {
                             <td className="px-6 py-4 whitespace-nowrap">
                                 <Badge variant="outline" className="border-white/10 bg-white/5 text-zinc-400 font-normal gap-1 hover:border-amber-500/30 hover:text-amber-500 transition-colors cursor-default">
                                     <History className="h-3 w-3" />
-                                    {patient._count.waitlistEntries} Filas
+                                    {/* CORREÇÃO AQUI: patient._count.entries */}
+                                    {patient._count.entries} Filas
                                 </Badge>
                             </td>
                             <td className="px-6 py-4 whitespace-nowrap text-sm text-zinc-500">

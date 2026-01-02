@@ -5,7 +5,7 @@ import { GradientText } from "@/components/ui/gradient-text";
 import { PremiumCard } from "@/components/ui/premium-card";
 import { PatientList } from "@/components/patients/patient-list";
 import { Button } from "@/components/ui/button";
-import { Plus, Users, TrendingUp, UserPlus } from "lucide-react";
+import { Plus, Users, TrendingUp, UserPlus, UploadCloud, Sparkles } from "lucide-react";
 
 export const dynamic = 'force-dynamic';
 
@@ -22,17 +22,17 @@ export default async function PatientsPage() {
     orderBy: { createdAt: 'desc' },
     include: {
         _count: {
-            select: { waitlistEntries: true }
+            select: { entries: true }
         }
     }
   });
 
-  // Métricas Simples
+  // Métricas
   const totalPatients = patients.length;
-  // Exemplo: Novos nos últimos 30 dias (mockado para exemplo visual, ou calcular via JS)
+  
+  const now = new Date();
   const newThisMonth = patients.filter(p => {
       const date = new Date(p.createdAt);
-      const now = new Date();
       return date.getMonth() === now.getMonth() && date.getFullYear() === now.getFullYear();
   }).length;
 
@@ -47,60 +47,89 @@ export default async function PatientsPage() {
                 <GradientText size="4xl">Base de Pacientes</GradientText>
             </div>
             <p className="text-zinc-400 max-w-2xl text-lg">
-                Gerencie seus contatos, visualize históricos e engajamento em filas de espera.
+                Gerencie seus contatos, visualize históricos e engajamento.
             </p>
         </div>
         
-        <Button className="h-12 px-6 rounded-full bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-white font-bold shadow-lg shadow-amber-900/20 group transition-all hover:scale-105">
+        <Button className="h-12 px-6 rounded-full bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-white font-bold shadow-lg shadow-amber-900/20 group transition-all hover:scale-105 active:scale-95">
             <Plus className="mr-2 h-5 w-5 group-hover:rotate-90 transition-transform" />
             Novo Paciente
         </Button>
       </div>
 
-      {/* --- METRICS GRID --- */}
+      {/* --- METRICS GRID (Novas Cores: Violeta & Ouro) --- */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <PremiumCard className="p-6 flex items-center gap-4" glow>
-            <div className="h-14 w-14 rounded-2xl bg-gradient-to-br from-blue-500/20 to-blue-600/10 flex items-center justify-center border border-blue-500/20 text-blue-400">
-                <Users className="h-7 w-7" />
+        
+        {/* CARD 1: Total de Pacientes (Tema VIOLETA - Profundidade) */}
+        <PremiumCard className="p-6 flex flex-row items-center gap-5" glow>
+            {/* Ícone Iluminado */}
+            <div className="h-16 w-16 rounded-2xl bg-zinc-900 flex items-center justify-center ring-1 ring-violet-500/50 shadow-[0_0_25px_-5px_rgba(139,92,246,0.4)] backdrop-blur-md group-hover:scale-110 transition-transform duration-500">
+                <Users className="h-8 w-8 text-violet-400" />
             </div>
             <div>
-                <p className="text-sm font-medium text-zinc-500 uppercase tracking-wider">Total de Pacientes</p>
-                <div className="flex items-baseline gap-2">
-                    <span className="text-3xl font-bold text-white">{totalPatients}</span>
-                    <span className="text-xs text-emerald-500 font-medium flex items-center">
-                        <TrendingUp className="h-3 w-3 mr-1" /> Ativos
-                    </span>
+                <p className="text-sm font-bold text-zinc-500 uppercase tracking-wider">Total na Base</p>
+                {/* Número Gigante e Branco */}
+                <div className="flex items-baseline gap-2 mt-1">
+                    <span className="text-4xl font-black text-white tracking-tight drop-shadow-lg">{totalPatients}</span>
                 </div>
+                 <span className="text-xs text-violet-400 font-semibold flex items-center mt-1">
+                    <TrendingUp className="h-3 w-3 mr-1" /> Base Ativa
+                </span>
             </div>
+            {/* Background Accent sutil */}
+            <div className="absolute right-0 top-0 w-32 h-32 bg-violet-600/10 blur-[50px] rounded-full -z-10" />
         </PremiumCard>
 
-        <PremiumCard className="p-6 flex items-center gap-4" delay={0.1}>
-            <div className="h-14 w-14 rounded-2xl bg-gradient-to-br from-emerald-500/20 to-emerald-600/10 flex items-center justify-center border border-emerald-500/20 text-emerald-400">
-                <UserPlus className="h-7 w-7" />
+        {/* CARD 2: Novos este Mês (Tema ÂMBAR/GOLD - Alinhado à Marca) */}
+        <PremiumCard className="p-6 flex items-center gap-5" delay={0.1}>
+            <div className="h-16 w-16 rounded-2xl bg-zinc-900 flex items-center justify-center ring-1 ring-amber-500/50 shadow-[0_0_25px_-5px_rgba(245,158,11,0.4)] backdrop-blur-md group-hover:scale-110 transition-transform duration-500">
+                <UserPlus className="h-8 w-8 text-amber-400" />
             </div>
             <div>
-                <p className="text-sm font-medium text-zinc-500 uppercase tracking-wider">Novos este Mês</p>
-                <div className="flex items-baseline gap-2">
-                    <span className="text-3xl font-bold text-white">{newThisMonth}</span>
-                    <span className="text-xs text-zinc-500">cadastros recentes</span>
+                <p className="text-sm font-bold text-zinc-500 uppercase tracking-wider">Novos (Mês)</p>
+                <div className="flex items-baseline gap-2 mt-1">
+                    <span className="text-4xl font-black text-white tracking-tight drop-shadow-lg">{newThisMonth}</span>
                 </div>
+                <span className="text-xs text-amber-400 font-semibold flex items-center mt-1">
+                    <Sparkles className="h-3 w-3 mr-1" /> Crescimento
+                </span>
             </div>
+            <div className="absolute right-0 top-0 w-32 h-32 bg-amber-600/10 blur-[50px] rounded-full -z-10" />
         </PremiumCard>
         
-        {/* Card Decorativo / Call to Action */}
-        <PremiumCard className="p-0 relative overflow-hidden group cursor-pointer" delay={0.2}>
-            <div className="absolute inset-0 bg-gradient-to-r from-amber-600/20 to-purple-600/20 group-hover:opacity-100 transition-opacity opacity-50" />
-            <div className="relative p-6 flex flex-col justify-center h-full">
-                <p className="text-lg font-bold text-white mb-1">Importar Contatos?</p>
-                <p className="text-sm text-zinc-400 mb-3">Traga sua base via CSV ou Excel.</p>
-                <span className="text-xs font-bold text-amber-500 uppercase tracking-widest flex items-center gap-2 group-hover:gap-4 transition-all">
-                    Iniciar Importação →
-                </span>
+        {/* CARD 3: Importar (Tema NEUTRO/PRATA - Ação) */}
+        <PremiumCard className="p-0 relative overflow-hidden group cursor-pointer border-zinc-800 hover:border-zinc-600" delay={0.2}>
+            {/* Gradiente de fundo escuro para leitura */}
+            <div className="absolute inset-0 bg-gradient-to-br from-zinc-900 via-zinc-950 to-black" />
+            
+            <div className="relative p-6 h-full flex flex-col justify-between z-10">
+               <div className="flex justify-between items-start">
+                   <div>
+                    <p className="text-xl font-bold text-white mb-1 group-hover:text-amber-200 transition-colors">
+                        Importar Dados
+                    </p>
+                    <p className="text-sm text-zinc-400 group-hover:text-zinc-300 transition-colors">
+                        CSV ou Excel
+                    </p>
+                   </div>
+                   <div className="p-3 rounded-xl bg-zinc-800/80 group-hover:bg-amber-500/20 transition-colors border border-white/5">
+                    <UploadCloud className="h-6 w-6 text-zinc-400 group-hover:text-amber-400 transition-colors" />
+                   </div>
+               </div>
+               
+               <div className="mt-4">
+                   <div className="w-full h-1 bg-zinc-800 rounded-full overflow-hidden">
+                        <div className="h-full bg-amber-500 w-0 group-hover:w-full transition-all duration-700 ease-out" />
+                   </div>
+                   <p className="text-[10px] text-zinc-500 mt-2 font-bold uppercase tracking-widest text-right group-hover:text-amber-500 transition-colors">
+                        Clique para iniciar
+                   </p>
+               </div>
             </div>
         </PremiumCard>
       </div>
 
-      {/* --- MAIN CONTENT --- */}
+      {/* --- LISTA DE PACIENTES --- */}
       <PatientList patients={patients} />
       
     </div>
