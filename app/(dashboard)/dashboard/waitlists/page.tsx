@@ -1,17 +1,23 @@
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { CreateWaitlistDialog } from "@/components/waitlist/create-waitlist-dialog";
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Users, ArrowRight } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { Users, ArrowRight, CalendarDays, MoreHorizontal } from "lucide-react";
 import Link from "next/link";
+import { WaitlistGrid } from "@/components/waitlist/waitlist-grid";
+
+// Para facilitar, vou manter o componente Server Side e usar classes CSS e estrutura para beleza.
+// Se quiser animação de entrada complexa, teríamos que extrair um Client Component para a lista.
+// Vou fazer a lista ser um Client Component para permitir Framer Motion.
+
 
 export default async function WaitlistsPage() {
   const session = await auth();
   
   if (!session?.user?.email) return null;
 
-  // Busca listas do usuário logado + contagem de pacientes esperando
   const waitlists = await prisma.waitlist.findMany({
     where: {
       owner: { email: session.user.email }
@@ -27,52 +33,24 @@ export default async function WaitlistsPage() {
   });
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-2xl font-bold tracking-tight">Listas de Espera</h2>
-          <p className="text-muted-foreground">Gerencie suas filas e disparos automáticos.</p>
+    <div className="space-y-8">
+      {/* Header com Efeito Glow */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 relative z-10">
+        <div className="space-y-1">
+          <h2 className="text-3xl font-bold tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-zinc-900 to-zinc-500 dark:from-white dark:to-zinc-400">
+            Minhas Listas
+          </h2>
+          <p className="text-zinc-500 dark:text-zinc-400 text-sm max-w-md">
+            Gerencie suas filas de espera ativas e monitore a demanda em tempo real.
+          </p>
         </div>
-        <CreateWaitlistDialog />
+        <div className="flex items-center gap-2">
+            <CreateWaitlistDialog />
+        </div>
       </div>
 
-      {waitlists.length === 0 ? (
-        <div className="flex flex-col items-center justify-center rounded-lg border border-dashed p-8 text-center animate-in fade-in-50">
-          <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-primary/10">
-            <Users className="h-6 w-6 text-primary" />
-          </div>
-          <h3 className="mt-4 text-lg font-semibold">Nenhuma lista criada</h3>
-          <p className="mb-4 mt-2 text-sm text-muted-foreground max-w-sm">
-            Você ainda não tem listas de espera. Crie uma agora para começar a adicionar pacientes.
-          </p>
-          <CreateWaitlistDialog />
-        </div>
-      ) : (
-        <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
-          {waitlists.map((list) => (
-            <Card key={list.id} className="flex flex-col">
-              <CardHeader>
-                <CardTitle>{list.name}</CardTitle>
-                <CardDescription>{list.description || "Sem descrição"}</CardDescription>
-              </CardHeader>
-              <CardContent className="flex-1">
-                <div className="flex items-center gap-2 text-2xl font-bold">
-                  {list._count.entries}
-                  <span className="text-sm font-normal text-muted-foreground">pacientes na fila</span>
-                </div>
-              </CardContent>
-              <CardFooter className="bg-zinc-50/50 dark:bg-zinc-900/50 p-4">
-                <Link href={`/dashboard/waitlists/${list.id}`} className="w-full">
-                  <Button variant="outline" className="w-full justify-between group">
-                    Gerenciar Fila
-                    <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-1" />
-                  </Button>
-                </Link>
-              </CardFooter>
-            </Card>
-          ))}
-        </div>
-      )}
+      {/* Lista Isolada em Client Component para Animações */}
+      <WaitlistGrid waitlists={waitlists} />
     </div>
   );
 }

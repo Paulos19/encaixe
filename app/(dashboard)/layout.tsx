@@ -2,6 +2,8 @@ import { auth } from "@/auth";
 import { redirect } from "next/navigation";
 import { Sidebar } from "@/components/dashboard/sidebar";
 import { Header } from "@/components/dashboard/header";
+import { SidebarProvider } from "@/components/ui/sidebar-context";
+import { DashboardWrapper } from "@/components/dashboard/dashboard-wrapper";
 
 export default async function DashboardLayout({
   children,
@@ -10,33 +12,29 @@ export default async function DashboardLayout({
 }) {
   const session = await auth();
 
-  // Proteção dupla: middleware já deve pegar, mas aqui garantimos o objeto user
   if (!session?.user) {
     redirect("/login");
   }
 
-  // Garantir que a role existe (fallback seguro)
   const user = {
     ...session.user,
     role: session.user.role || "MANAGER"
   };
 
   return (
-    <div className="grid min-h-screen w-full md:grid-cols-[220px_1fr] lg:grid-cols-[280px_1fr]">
-      {/* Sidebar Desktop - Hidden on Mobile */}
-      <div className="hidden border-r bg-zinc-50/40 dark:bg-zinc-900/40 md:block">
-        <div className="flex h-full max-h-screen flex-col gap-2">
-          <Sidebar userRole={user.role} />
-        </div>
+    <SidebarProvider>
+      <div className="flex min-h-screen w-full bg-zinc-50 dark:bg-black">
+        {/* A Sidebar consome o contexto internamente */}
+        <Sidebar userRole={user.role} />
+        
+        {/* O Wrapper ajusta a margem baseado no contexto */}
+        <DashboardWrapper>
+          <Header user={user} />
+          <div className="flex-1 p-6 md:p-8 pt-6 max-w-7xl mx-auto w-full animate-in fade-in-50 slide-in-from-bottom-2 duration-500">
+            {children}
+          </div>
+        </DashboardWrapper>
       </div>
-      
-      {/* Área Principal */}
-      <div className="flex flex-col">
-        <Header user={user} />
-        <main className="flex flex-1 flex-col gap-4 p-4 lg:gap-6 lg:p-6 bg-zinc-50/20 dark:bg-zinc-950">
-          {children}
-        </main>
-      </div>
-    </div>
+    </SidebarProvider>
   );
 }
