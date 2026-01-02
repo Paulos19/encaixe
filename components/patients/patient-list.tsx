@@ -24,10 +24,12 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Badge } from '@/components/ui/badge';
+import { Card } from '@/components/ui/card'; // Importar Card
 import { formatDistanceToNow } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { cn } from '@/lib/utils';
 
+// ... (Interfaces Patient e PatientListProps mantêm-se iguais) ...
 interface Patient {
   id: string;
   name: string;
@@ -51,6 +53,7 @@ export function PatientList({ patients: initialPatients }: PatientListProps) {
   );
 
   const getAvatarColor = (name: string) => {
+     // ... (mesma lógica de cores) ...
     const colors = [
         "text-amber-600 bg-amber-100 dark:bg-amber-900/30 dark:text-amber-400",
         "text-violet-600 bg-violet-100 dark:bg-violet-900/30 dark:text-violet-400",
@@ -60,15 +63,32 @@ export function PatientList({ patients: initialPatients }: PatientListProps) {
     return colors[name.length % colors.length];
   };
 
+  // Componente de ações para reutilizar (Mobile e Desktop)
+  const PatientActions = () => (
+    <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+            <Button variant="ghost" size="icon" className="h-8 w-8 text-zinc-400 hover:text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-900/20">
+                <MoreHorizontal className="h-4 w-4" />
+            </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-48">
+            <DropdownMenuLabel>Gerenciar</DropdownMenuLabel>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem>Editar Dados</DropdownMenuItem>
+            <DropdownMenuItem>Ver Histórico</DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem className="text-red-500">Excluir</DropdownMenuItem>
+        </DropdownMenuContent>
+    </DropdownMenu>
+  );
+
   return (
     <div className="space-y-4">
       
-      {/* --- BARRA DE FERRAMENTAS RESPONSIVA --- */}
-      {/* Flex-col no mobile para empilhar busca e botões */}
+      {/* --- BARRA DE FERRAMENTAS --- */}
       <div className="flex flex-col md:flex-row gap-3 md:gap-4 justify-between items-start md:items-center bg-white dark:bg-zinc-900/50 p-3 md:p-2 rounded-2xl border border-zinc-200 dark:border-zinc-800 shadow-sm backdrop-blur-sm">
-        
-        {/* Busca Full Width no Mobile */}
-        <div className="relative w-full md:w-96 group">
+         {/* ... (Busca e botões mantêm-se iguais, já estavam bons) ... */}
+         <div className="relative w-full md:w-96 group">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-400 group-focus-within:text-amber-500 transition-colors" />
             <Input 
                 placeholder="Buscar por nome ou telefone..." 
@@ -78,23 +98,66 @@ export function PatientList({ patients: initialPatients }: PatientListProps) {
             />
         </div>
 
-        {/* Botões lado a lado no Mobile (flex-row com w-full) */}
         <div className="flex gap-2 w-full md:w-auto px-0 md:px-2">
-            <Button variant="outline" size="sm" className="flex-1 md:flex-none h-9 rounded-lg border-zinc-200 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-300">
-                <Filter className="mr-2 h-3.5 w-3.5" /> 
-                Filtros
+            <Button variant="outline" size="sm" className="flex-1 md:flex-none h-9 rounded-lg">
+                <Filter className="mr-2 h-3.5 w-3.5" /> Filtros
             </Button>
-            <Button variant="outline" size="sm" className="flex-1 md:flex-none h-9 rounded-lg border-zinc-200 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-300">
-                <Download className="mr-2 h-3.5 w-3.5" /> 
-                Exportar
+            <Button variant="outline" size="sm" className="flex-1 md:flex-none h-9 rounded-lg">
+                <Download className="mr-2 h-3.5 w-3.5" /> Exportar
             </Button>
         </div>
       </div>
 
-      {/* --- TABELA COM SCROLL HORIZONTAL --- */}
-      <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/50 overflow-hidden shadow-sm">
-        <div className="overflow-x-auto w-full"> {/* <-- CRÍTICO: Permite scroll horizontal */}
-            <table className="w-full min-w-[700px]"> {/* <-- CRÍTICO: Garante largura mínima para não espremer colunas */}
+      {/* --- VIEW MOBILE (Cards) --- */}
+      <div className="grid grid-cols-1 gap-4 md:hidden">
+        <AnimatePresence>
+            {filteredPatients.map((patient) => (
+                <motion.div
+                    key={patient.id}
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, scale: 0.95 }}
+                >
+                    <Card className="p-4 flex flex-col gap-3 bg-white dark:bg-zinc-900/50 border-zinc-200 dark:border-zinc-800">
+                        <div className="flex justify-between items-start">
+                            <div className="flex items-center gap-3">
+                                <Avatar className="h-10 w-10 border border-zinc-200">
+                                    <AvatarFallback className={cn("font-bold text-xs", getAvatarColor(patient.name))}>
+                                        {patient.name.substring(0,2).toUpperCase()}
+                                    </AvatarFallback>
+                                </Avatar>
+                                <div>
+                                    <h3 className="font-semibold text-zinc-900 dark:text-zinc-100">{patient.name}</h3>
+                                    <p className="text-xs text-zinc-500">{formatDistanceToNow(new Date(patient.createdAt), { locale: ptBR, addSuffix: true })}</p>
+                                </div>
+                            </div>
+                            <PatientActions />
+                        </div>
+                        
+                        <div className="grid grid-cols-2 gap-2 mt-2">
+                             <div className="flex items-center gap-2 text-sm text-zinc-600 dark:text-zinc-400 bg-zinc-50 dark:bg-zinc-800/50 p-2 rounded-lg">
+                                <Phone className="h-3.5 w-3.5" />
+                                <span className="truncate">{patient.phone}</span>
+                             </div>
+                             <div className="flex items-center gap-2 text-sm justify-center bg-zinc-50 dark:bg-zinc-800/50 p-2 rounded-lg">
+                                <History className="h-3.5 w-3.5 text-zinc-400" />
+                                <span className="font-medium">{patient._count.entries} filas</span>
+                             </div>
+                        </div>
+                    </Card>
+                </motion.div>
+            ))}
+        </AnimatePresence>
+        {filteredPatients.length === 0 && (
+            <div className="text-center py-10 text-zinc-500">Nenhum paciente encontrado.</div>
+        )}
+      </div>
+
+      {/* --- VIEW DESKTOP (Table) --- */}
+      <div className="hidden md:block rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/50 overflow-hidden shadow-sm">
+        <div className="overflow-x-auto w-full">
+            <table className="w-full">
+                {/* ... (Cabeçalho da tabela mantém-se igual) ... */}
                 <thead>
                     <tr className="border-b border-zinc-100 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-900/80">
                         <th className="px-6 py-4 text-left text-[11px] font-bold text-zinc-500 uppercase tracking-widest">Paciente</th>
@@ -106,23 +169,7 @@ export function PatientList({ patients: initialPatients }: PatientListProps) {
                 </thead>
                 <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800/50">
                     <AnimatePresence>
-                    {filteredPatients.length === 0 ? (
-                         <tr>
-                            <td colSpan={5} className="px-6 py-16 text-center">
-                                <motion.div 
-                                    initial={{ opacity: 0, scale: 0.9 }} 
-                                    animate={{ opacity: 1, scale: 1 }}
-                                    className="flex flex-col items-center justify-center gap-3"
-                                >
-                                    <div className="h-16 w-16 rounded-2xl bg-zinc-100 dark:bg-zinc-800 border border-dashed border-zinc-300 dark:border-zinc-700 flex items-center justify-center">
-                                        <UserIcon className="h-8 w-8 text-zinc-400" />
-                                    </div>
-                                    <p className="font-medium text-zinc-900 dark:text-zinc-200">Nenhum paciente encontrado</p>
-                                </motion.div>
-                            </td>
-                         </tr>
-                    ) : (
-                        filteredPatients.map((patient, index) => (
+                    {filteredPatients.map((patient, index) => (
                         <motion.tr 
                             key={patient.id}
                             initial={{ opacity: 0 }}
@@ -130,6 +177,7 @@ export function PatientList({ patients: initialPatients }: PatientListProps) {
                             transition={{ delay: index * 0.05 }}
                             className="group hover:bg-zinc-50 dark:hover:bg-zinc-800/30 transition-colors"
                         >
+                            {/* ... (Células mantêm-se iguais, apenas substitua o dropdown pelo componente <PatientActions />) ... */}
                             <td className="px-6 py-4 whitespace-nowrap">
                                 <div className="flex items-center gap-3">
                                     <Avatar className="h-9 w-9 border border-zinc-200 dark:border-zinc-700/50">
@@ -175,31 +223,10 @@ export function PatientList({ patients: initialPatients }: PatientListProps) {
                             </td>
 
                             <td className="px-6 py-4 whitespace-nowrap text-right">
-                                <DropdownMenu>
-                                    <DropdownMenuTrigger asChild>
-                                        <Button variant="ghost" size="icon" className="h-8 w-8 text-zinc-400 hover:text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-900/20">
-                                            <MoreHorizontal className="h-4 w-4" />
-                                        </Button>
-                                    </DropdownMenuTrigger>
-                                    <DropdownMenuContent align="end" className="w-48 rounded-xl border-zinc-200 dark:border-zinc-800 bg-white/95 dark:bg-zinc-950/95 backdrop-blur-xl">
-                                        <DropdownMenuLabel>Gerenciar</DropdownMenuLabel>
-                                        <DropdownMenuSeparator />
-                                        <DropdownMenuItem className="cursor-pointer">
-                                            <UserIcon className="mr-2 h-4 w-4" /> Editar Dados
-                                        </DropdownMenuItem>
-                                        <DropdownMenuItem className="cursor-pointer">
-                                            <History className="mr-2 h-4 w-4" /> Ver Histórico
-                                        </DropdownMenuItem>
-                                        <DropdownMenuSeparator />
-                                        <DropdownMenuItem className="text-red-500 cursor-pointer">
-                                            Excluir
-                                        </DropdownMenuItem>
-                                    </DropdownMenuContent>
-                                </DropdownMenu>
+                                <PatientActions />
                             </td>
                         </motion.tr>
-                        ))
-                    )}
+                    ))}
                     </AnimatePresence>
                 </tbody>
             </table>

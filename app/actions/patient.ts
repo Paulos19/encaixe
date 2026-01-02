@@ -5,13 +5,86 @@ import { prisma } from '@/lib/prisma';
 import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
 
-const AddPatientSchema = z.object({
+// --- Schemas de Validação ---
+
+// Schema para adicionar diretamente à lista de espera (mantido)
+const AddPatientToWaitlistSchema = z.object({
   name: z.string().min(2, "Nome obrigatório"),
-  phone: z.string().min(10, "Telefone inválido"), // Idealmente usar lib de validação E.164
+  phone: z.string().min(10, "Telefone inválido"),
   notes: z.string().optional(),
   waitlistId: z.string().cuid(),
 });
 
+// Schema para criação geral de paciente (novo)
+const CreatePatientSchema = z.object({
+  name: z.string().min(2, "Nome obrigatório"),
+  phone: z.string().min(10, "Telefone inválido"),
+  notes: z.string().optional(),
+});
+
+// --- Server Actions ---
+
+/**
+ * Cria um novo paciente na base geral do médico.
+ * Usado na tela dashboard/patients.
+ */
+export async function createPatient(formData: FormData) {
+  const session = await auth();
+  if (!session?.user?.email) return { error: "Não autorizado" };
+
+  const rawData = {
+    name: formData.get('name'),
+    phone: formData.get('phone'),
+    notes: formData.get('notes'),
+  };
+
+  const validated = CreatePatientSchema.safeParse(rawData);
+
+  if (!validated.success) {
+    return { error: "Dados inválidos. Verifique o telefone e o nome." };
+  }
+
+  const { name, phone, notes } = validated.data;
+
+  try {
+    const user = await prisma.user.findUnique({ where: { email: session.user.email } });
+    if (!user) return { error: "Usuário não encontrado" };
+
+    // Verifica se já existe um paciente com este telefone para este médico
+    const existingPatient = await prisma.patient.findFirst({
+        where: { 
+          managerId: user.id,
+          phone: phone 
+        }
+    });
+
+    if (existingPatient) {
+        return { error: "Já existe um paciente cadastrado com este telefone." };
+    }
+
+    // Cria o paciente
+    await prisma.patient.create({
+        data: {
+          name,
+          phone,
+          notes,
+          managerId: user.id
+        }
+    });
+
+    revalidatePath('/dashboard/patients');
+    return { success: true };
+
+  } catch (error: any) {
+    console.error("Erro ao criar paciente:", error);
+    return { error: "Erro interno ao cadastrar paciente." };
+  }
+}
+
+/**
+ * Adiciona um paciente a uma lista de espera específica.
+ * Cria o paciente na base se ele ainda não existir.
+ */
 export async function addPatientToWaitlist(formData: FormData) {
   const session = await auth();
   if (!session?.user?.email) return { error: "Não autorizado" };
@@ -23,7 +96,7 @@ export async function addPatientToWaitlist(formData: FormData) {
     waitlistId: formData.get('waitlistId'),
   };
 
-  const validated = AddPatientSchema.safeParse(rawData);
+  const validated = AddPatientToWaitlistSchema.safeParse(rawData);
 
   if (!validated.success) {
     return { error: "Dados inválidos. Verifique o telefone." };
@@ -62,8 +135,8 @@ export async function addPatientToWaitlist(formData: FormData) {
           }
         });
       } else {
-        // Se existe, opcionalmente atualiza notas ou nome se vier diferente? 
-        // Por segurança, vamos manter o original, ou atualizar apenas se solicitado.
+        // Se existe, não atualizamos os dados para preservar o histórico,
+        // a menos que você queira implementar uma lógica de atualização aqui.
       }
 
       // 3. Verifica se já está nesta fila específica

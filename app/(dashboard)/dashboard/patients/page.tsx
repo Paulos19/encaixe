@@ -2,8 +2,8 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { redirect } from "next/navigation";
 import { PatientList } from "@/components/patients/patient-list";
-import { Button } from "@/components/ui/button";
-import { Plus, Users, TrendingUp, Sparkles, UserPlus } from "lucide-react";
+import { CreatePatientDialog } from "@/components/patients/create-patient-dialog"; // <--- Importe aqui
+import { Users, TrendingUp, Sparkles, UserPlus } from "lucide-react";
 import { Card } from "@/components/ui/card";
 
 export const dynamic = 'force-dynamic';
@@ -15,7 +15,7 @@ export default async function PatientsPage() {
     redirect("/login");
   }
 
-  // --- Data Fetching ---
+  // --- Data Fetching (Mantém igual) ---
   const patients = await prisma.patient.findMany({
     where: { manager: { email: session.user.email } },
     orderBy: { createdAt: 'desc' },
@@ -26,21 +26,19 @@ export default async function PatientsPage() {
     }
   });
 
-  // Métricas
+  // Métricas (Mantém igual)
   const totalPatients = patients.length;
-  
   const now = new Date();
   const newThisMonth = patients.filter(p => {
       const date = new Date(p.createdAt);
       return date.getMonth() === now.getMonth() && date.getFullYear() === now.getFullYear();
   }).length;
-
   const engagedPatients = patients.filter(p => p._count.entries > 1).length;
 
   return (
     <div className="space-y-6 md:space-y-8 pb-8 relative z-10 animate-in fade-in slide-in-from-bottom-4 duration-700">
       
-      {/* --- HEADER RESPONSIVO (flex-col no mobile) --- */}
+      {/* --- HEADER --- */}
       <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 md:gap-6">
         <div className="space-y-1">
             <h1 className="text-2xl md:text-3xl font-bold tracking-tight text-zinc-900 dark:text-zinc-50 flex flex-wrap items-center gap-2 md:gap-3">
@@ -54,17 +52,14 @@ export default async function PatientsPage() {
             </p>
         </div>
         
-        <Button className="w-full md:w-auto h-11 px-6 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-white font-bold shadow-lg shadow-amber-500/20 group transition-all">
-            <Plus className="mr-2 h-5 w-5 group-hover:rotate-90 transition-transform" />
-            Novo Paciente
-        </Button>
+        {/* Substituído o Button pelo Dialog */}
+        <CreatePatientDialog />
       </div>
 
-      {/* --- GRID DE MÉTRICAS RESPONSIVA (1 col mobile / 3 col desktop) --- */}
+      {/* --- GRID DE MÉTRICAS (Mantenha o código dos cards igual) --- */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        
-        {/* CARD 1 */}
-        <Card className="relative overflow-hidden border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/50 p-5 md:p-6 shadow-sm group hover:border-violet-500/50 transition-colors">
+          {/* ... (Conteúdo dos Cards 1, 2 e 3 permanece o mesmo do original) ... */}
+          <Card className="relative overflow-hidden border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/50 p-5 md:p-6 shadow-sm group hover:border-violet-500/50 transition-colors">
             <div className="flex items-center gap-4 relative z-10">
                 <div className="flex h-10 w-10 md:h-12 md:w-12 shrink-0 items-center justify-center rounded-xl bg-violet-100 text-violet-600 dark:bg-violet-900/30 dark:text-violet-400 ring-1 ring-violet-500/20">
                     <Users className="h-5 w-5 md:h-6 md:w-6" />
