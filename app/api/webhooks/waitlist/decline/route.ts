@@ -1,11 +1,15 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { z } from 'zod';
+import { findAndNotifyNextPatient } from '@/app/actions/waitlist'; // Importamos a lógica
 
 const DeclineSchema = z.object({
   waitlistId: z.string().cuid(),
   patientId: z.string().cuid(),
   reason: z.string().optional(),
+  // Importante: O n8n precisa devolver o horário que estava sendo negociado
+  // para podermos oferecer ao próximo.
+  slotTime: z.string().optional(), 
 });
 
 export async function POST(request: Request) {
@@ -23,7 +27,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Dados inválidos' }, { status: 400 });
     }
 
-    const { waitlistId, patientId } = validated.data;
+    const { waitlistId, patientId, slotTime } = validated.data;
 
     // 2. Buscar a entrada
     const entry = await prisma.waitlistEntry.findFirst({
@@ -34,20 +38,31 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: 'Entry not found' }, { status: 404 });
     }
 
-    // 3. Atualizar status
+    // 3. Atualizar status para RECUSADO
     await prisma.waitlistEntry.update({
       where: { id: entry.id },
       data: {
-        status: 'DECLINED', // Marca como recusado
+        status: 'DECLINED',
         updatedAt: new Date()
       }
     });
 
-    // 4. Lógica Futura: Aqui poderíamos retornar o ID do PRÓXIMO paciente da fila
-    // para que o n8n já dispare a mensagem para ele.
-    // Por enquanto, apenas confirmamos o recebimento.
+    console.log(`[WAITLIST] Paciente ${patientId} recusou. Buscando próximo...`);
 
-    return NextResponse.json({ success: true }, { status: 200 });
+    // 4. Lógica do Loop Infinito
+    // Se tivermos o slotTime, chamamos o próximo da fila imediatamente.
+    let nextPatientResult = null;
+    
+    if (slotTime) {
+      nextPatientResult = await findAndNotifyNextPatient(waitlistId, slotTime);
+    } else {
+      console.warn("[WAITLIST] Loop interrompido: slotTime não fornecido pelo webhook.");
+    }
+
+    return NextResponse.json({ 
+      success: true, 
+      nextTriggered: nextPatientResult?.success || false 
+    }, { status: 200 });
 
   } catch (error) {
     console.error(error);
