@@ -4,6 +4,30 @@ import { prisma } from "@/lib/prisma";
 import { stripe } from "@/lib/stripe";
 import { PLANS } from "@/config/subscriptions";
 
+// Helper para extrair data independente da config do SDK (camelCase vs snake_case)
+function getSubscriptionEndDate(subscription: Stripe.Subscription): Date {
+  // Tenta ler snake_case (padrão API) ou camelCase (padrão SDK typescript: true)
+  const periodEndRaw = (subscription as any).current_period_end;
+  const periodEndCamel = (subscription as any).currentPeriodEnd;
+
+  let periodEnd: number | undefined;
+
+  if (typeof periodEndRaw === 'number') {
+    periodEnd = periodEndRaw;
+  } else if (typeof periodEndCamel === 'number') {
+    periodEnd = periodEndCamel;
+  }
+  
+  if (periodEnd === undefined) {
+    console.warn("⚠️ Data de expiração não encontrada na assinatura, usando data atual + 30 dias.");
+    const date = new Date();
+    date.setDate(date.getDate() + 30);
+    return date;
+  }
+  
+  return new Date(periodEnd * 1000);
+}
+
 export async function POST(req: Request) {
   const body = await req.text();
   const signature = (await headers()).get("Stripe-Signature") as string;
@@ -21,79 +45,105 @@ export async function POST(req: Request) {
     return new Response(`Webhook Error: ${error.message}`, { status: 400 });
   }
 
-  const session = event.data.object as Stripe.Checkout.Session;
-
   try {
+    const session = event.data.object as Stripe.Checkout.Session;
+
     // ----------------------------------------------------------------------
-    // CENÁRIO 1: Checkout Finalizado (Compra Inicial)
+    // CENÁRIO 1: Checkout Finalizado (Nova Assinatura)
     // ----------------------------------------------------------------------
     if (event.type === "checkout.session.completed") {
-      // Verifica se houve assinatura criada
       if (!session.subscription) {
-        // Se for pagamento único (não implementado aqui), apenas retornamos 200
         return new Response(null, { status: 200 });
       }
 
-      // Recupera a assinatura completa para ter acesso seguro às datas
-      const subscription: Stripe.Subscription = await stripe.subscriptions.retrieve(
+      // Recupera a assinatura completa
+      const subscription = await stripe.subscriptions.retrieve(
         session.subscription as string
       );
 
-      // Identifica o plano (Logica de Fallback segura)
+      // Validação Crítica: Verifica se temos o ID do usuário
+      const userId = session.metadata?.userId;
+      if (!userId) {
+        console.error("❌ Metadata 'userId' ausente na sessão do Stripe.");
+        return new Response("Metadata missing", { status: 400 });
+      }
+
+      // Identifica o plano
       const planKey = Object.keys(PLANS).find(
         (key) => PLANS[key as keyof typeof PLANS].stripePriceId === subscription.items.data[0].price.id
       );
-      const planConfig = PLANS[planKey as keyof typeof PLANS] || PLANS.FREE;
-
-      // Atualiza o usuário
-      await prisma.user.update({
-        where: { id: session.metadata?.userId },
-        data: {
-          stripeSubscriptionId: subscription.id,
-          stripeCustomerId: subscription.customer as string,
-          stripePriceId: subscription.items.data[0].price.id,
-          // Garante conversão segura de data
-          stripeCurrentPeriodEnd: new Date((subscription as any).current_period_end * 1000),
-          plan: planConfig.id,
-          messageLimit: planConfig.quota,
-          messagesSent: 0,
-        },
-      });
       
-      console.log(`✅ Plano ${planConfig.name} ativado para usuário ${session.metadata?.userId}`);
+      // Se não achar o plano (ex: preço antigo), usa o FREE ou mantém o atual? 
+      // Aqui forçamos o ESSENTIAL como fallback seguro ou o FREE.
+      const planConfig = planKey ? PLANS[planKey as keyof typeof PLANS] : PLANS.ESSENTIAL;
+
+      try {
+        await prisma.user.update({
+          where: { id: userId },
+          data: {
+            stripeSubscriptionId: subscription.id,
+            stripeCustomerId: subscription.customer as string,
+            stripePriceId: subscription.items.data[0].price.id,
+            stripeCurrentPeriodEnd: getSubscriptionEndDate(subscription),
+            plan: planConfig.id,
+            messageLimit: planConfig.quota,
+            messagesSent: 0, // Reset no início da assinatura
+          },
+        });
+        console.log(`✅ Assinatura criada para User: ${userId} | Plano: ${planConfig.name}`);
+      } catch (dbError) {
+        // Se o usuário não existe mais no banco, retornamos 200 para o Stripe parar de tentar
+        console.error(`❌ Erro ao atualizar usuário ${userId}:`, dbError);
+        return new Response("User update failed", { status: 200 }); 
+      }
     }
 
     // ----------------------------------------------------------------------
-    // CENÁRIO 2: Renovação Mensal com Sucesso
+    // CENÁRIO 2: Renovação Mensal (Pagamento da Fatura)
     // ----------------------------------------------------------------------
     if (event.type === "invoice.payment_succeeded") {
       const invoice: any = event.data.object as Stripe.Invoice;
 
-      // Verifica se o invoice pertence a uma assinatura (pode ser invoice de one-off)
       if ((invoice as any).subscription) {
-        const subscription: Stripe.Subscription = await stripe.subscriptions.retrieve(
+        const subscription = await stripe.subscriptions.retrieve(
           invoice.subscription as string
         );
 
-        // Atualiza a data de expiração e RESETA o contador de mensagens
-        await prisma.user.update({
+        // Atualiza a renovação buscando pelo ID da assinatura
+        // UpdateMany é mais seguro aqui caso haja inconsistência de IDs únicos
+        const result = await prisma.user.updateMany({
           where: { stripeSubscriptionId: subscription.id },
           data: {
             stripePriceId: subscription.items.data[0].price.id,
-            stripeCurrentPeriodEnd: new Date((subscription as any).current_period_end * 1000),
-            messagesSent: 0, // Reset mensal crítico
+            stripeCurrentPeriodEnd: getSubscriptionEndDate(subscription),
+            messagesSent: 0, // <--- O PULO DO GATO: Reseta a quota mensal
           },
         });
-        
-        console.log(`🔄 Assinatura renovada para ${subscription.id}`);
+
+        if (result.count > 0) {
+          console.log(`🔄 Assinatura renovada: ${subscription.id}`);
+        } else {
+          console.warn(`⚠️ Assinatura renovada no Stripe mas usuário não encontrado: ${subscription.id}`);
+        }
       }
     }
 
+    // ----------------------------------------------------------------------
+    // CENÁRIO 3 (OPCIONAL): Cancelamento ou Falha de Pagamento
+    // ----------------------------------------------------------------------
+    if (event.type === "customer.subscription.deleted" || event.type === "invoice.payment_failed") {
+        const subscription = event.data.object as Stripe.Subscription;
+        
+        // Opcional: Reverter para plano FREE imediatamente ou esperar expirar a data?
+        // Geralmente apenas logamos, pois a verificação de data no frontend/backend barra o uso.
+        console.log(`⚠️ Assinatura cancelada ou falhou: ${subscription.id}`);
+    }
+
   } catch (error: any) {
-    // Loga o erro mas retorna 200 ou 500 dependendo da estratégia. 
-    // Retornar 500 faz o Stripe tentar de novo (bom para falhas de rede, ruim para bugs de código).
-    console.error("❌ Erro ao processar evento do Stripe:", error);
-    return new Response("Webhook handler failed", { status: 500 });
+    console.error("❌ Erro fatal no processamento do Webhook:", error);
+    // Retornamos 500 apenas para erros de servidor reais (ex: Stripe fora do ar), 
+    // para que a Stripe tente reenviar.
+    return new Response("Internal Server Error", { status: 500 });
   }
 
   return new Response(null, { status: 200 });
