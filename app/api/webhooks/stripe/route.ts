@@ -3,6 +3,7 @@ import Stripe from "stripe";
 import { prisma } from "@/lib/prisma";
 import { stripe } from "@/lib/stripe";
 import { PLANS } from "@/config/subscriptions";
+import { sendSubscriptionSuccessEmail } from "@/lib/mail"; // Importe a função de email
 
 // Helper para extrair data independente da config do SDK (camelCase vs snake_case)
 function getSubscriptionEndDate(subscription: Stripe.Subscription): Date {
@@ -73,12 +74,11 @@ export async function POST(req: Request) {
         (key) => PLANS[key as keyof typeof PLANS].stripePriceId === subscription.items.data[0].price.id
       );
       
-      // Se não achar o plano (ex: preço antigo), usa o FREE ou mantém o atual? 
-      // Aqui forçamos o ESSENTIAL como fallback seguro ou o FREE.
       const planConfig = planKey ? PLANS[planKey as keyof typeof PLANS] : PLANS.ESSENTIAL;
 
       try {
-        await prisma.user.update({
+        // Atualiza o banco
+        const updatedUser = await prisma.user.update({
           where: { id: userId },
           data: {
             stripeSubscriptionId: subscription.id,
@@ -90,9 +90,17 @@ export async function POST(req: Request) {
             messagesSent: 0, // Reset no início da assinatura
           },
         });
+        
         console.log(`✅ Assinatura criada para User: ${userId} | Plano: ${planConfig.name}`);
+
+        // 🚀 DISPARO DE EMAIL DE SUCESSO
+        try {
+            await sendSubscriptionSuccessEmail(updatedUser.email, updatedUser.name || "Cliente", planConfig.name);
+        } catch (emailError) {
+            console.error("⚠️ Erro ao enviar email de assinatura:", emailError);
+        }
+
       } catch (dbError) {
-        // Se o usuário não existe mais no banco, retornamos 200 para o Stripe parar de tentar
         console.error(`❌ Erro ao atualizar usuário ${userId}:`, dbError);
         return new Response("User update failed", { status: 200 }); 
       }
@@ -109,14 +117,13 @@ export async function POST(req: Request) {
           invoice.subscription as string
         );
 
-        // Atualiza a renovação buscando pelo ID da assinatura
-        // UpdateMany é mais seguro aqui caso haja inconsistência de IDs únicos
+        // Atualiza a renovação e reseta quota
         const result = await prisma.user.updateMany({
           where: { stripeSubscriptionId: subscription.id },
           data: {
             stripePriceId: subscription.items.data[0].price.id,
             stripeCurrentPeriodEnd: getSubscriptionEndDate(subscription),
-            messagesSent: 0, // <--- O PULO DO GATO: Reseta a quota mensal
+            messagesSent: 0, // Reset mensal
           },
         });
 
@@ -133,16 +140,11 @@ export async function POST(req: Request) {
     // ----------------------------------------------------------------------
     if (event.type === "customer.subscription.deleted" || event.type === "invoice.payment_failed") {
         const subscription = event.data.object as Stripe.Subscription;
-        
-        // Opcional: Reverter para plano FREE imediatamente ou esperar expirar a data?
-        // Geralmente apenas logamos, pois a verificação de data no frontend/backend barra o uso.
         console.log(`⚠️ Assinatura cancelada ou falhou: ${subscription.id}`);
     }
 
   } catch (error: any) {
     console.error("❌ Erro fatal no processamento do Webhook:", error);
-    // Retornamos 500 apenas para erros de servidor reais (ex: Stripe fora do ar), 
-    // para que a Stripe tente reenviar.
     return new Response("Internal Server Error", { status: 500 });
   }
 
