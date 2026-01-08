@@ -7,6 +7,7 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Logo } from "./logo";
 import { motion, AnimatePresence } from "framer-motion";
+import { UsageCard } from "./usage-card"; // <--- Importando o novo componente
 import { 
   LayoutDashboard, 
   Users, 
@@ -18,8 +19,8 @@ import {
   ShieldAlert,  
   BarChart3,    
   LifeBuoy,
-  Zap,
-  X
+  X,
+  CreditCard // Se não estiver usando, pode remover
 } from "lucide-react";
 
 // --- DEFINIÇÃO DAS ROTAS ---
@@ -27,25 +28,30 @@ const menuItems = [
   { title: "Visão Geral", href: "/dashboard", icon: LayoutDashboard, roles: ["ADMIN", "MANAGER"] },
   { title: "Listas de Espera", href: "/dashboard/waitlists", icon: CalendarDays, roles: ["MANAGER"] },
   { title: "Pacientes", href: "/dashboard/patients", icon: Users, roles: ["MANAGER"] },
-  { title: "Configurações", href: "/dashboard/settings", icon: Settings, roles: ["MANAGER"] },
+  { title: "Assinatura", href: "/dashboard/settings/billing", icon: Settings, roles: ["MANAGER"] },
   { title: "Gestão de Clientes", href: "/admin/tenants", icon: BarChart3, roles: ["ADMIN"] },
   { title: "Logs do Sistema", href: "/admin/logs", icon: ShieldAlert, roles: ["ADMIN"] },
 ];
 
 interface SidebarProps {
   userRole?: string;
+  usageData?: {
+    plan: "FREE" | "ESSENTIAL" | "PRO" | "PLUS";
+    used: number;
+    limit: number;
+  };
 }
 
-export function Sidebar({ userRole = "MANAGER" }: SidebarProps) {
+export function Sidebar({ userRole = "MANAGER", usageData }: SidebarProps) {
   const { isCollapsed, toggleSidebar, isMobile } = useSidebar();
   const pathname = usePathname();
 
   const filteredItems = menuItems.filter((item) => item.roles.includes(userRole));
+  const hasPlanData = !!usageData && userRole !== "ADMIN";
 
   return (
     <>
-      {/* --- MOBILE OVERLAY (Fundo Escuro) --- */}
-      {/* Só aparece no Mobile quando a sidebar está ABERTA */}
+      {/* --- MOBILE OVERLAY --- */}
       <AnimatePresence>
         {isMobile && !isCollapsed && (
           <motion.div
@@ -61,15 +67,10 @@ export function Sidebar({ userRole = "MANAGER" }: SidebarProps) {
       {/* --- SIDEBAR CONTAINER --- */}
       <aside
         className={cn(
-          "fixed left-0 top-0 z-50 h-screen border-r border-zinc-200 dark:border-zinc-800 bg-white/95 dark:bg-zinc-950/95 backdrop-blur-md shadow-2xl transition-all duration-300 ease-in-out",
-          // Lógica de Largura:
-          // Mobile: Sempre w-72 (mas escondido via translate se colapsado)
-          // Desktop: w-[90px] (colapsado) ou w-72 (expandido)
+          "fixed left-0 top-0 z-50 h-screen border-r border-zinc-200 dark:border-zinc-800 bg-white/95 dark:bg-zinc-950/95 backdrop-blur-md shadow-2xl transition-all duration-300 ease-in-out flex flex-col",
           isMobile 
             ? "w-72" 
             : (isCollapsed ? "w-[90px]" : "w-72"),
-          
-          // Visibilidade Mobile (Slide-in)
           isMobile && (isCollapsed ? "-translate-x-full" : "translate-x-0")
         )}
       >
@@ -97,7 +98,7 @@ export function Sidebar({ userRole = "MANAGER" }: SidebarProps) {
            </button>
         )}
 
-        <div className="flex h-full flex-col px-4 py-6">
+        <div className="flex flex-col h-full px-4 py-6">
           
           {/* --- HEADER --- */}
           <div className={cn("flex items-center mb-8 transition-all duration-300", isCollapsed && !isMobile ? "justify-center" : "pl-2")}>
@@ -114,7 +115,7 @@ export function Sidebar({ userRole = "MANAGER" }: SidebarProps) {
                 <Link
                   key={index}
                   href={item.href}
-                  onClick={() => isMobile && toggleSidebar()} // Fecha ao clicar no mobile
+                  onClick={() => isMobile && toggleSidebar()}
                   className={cn(
                     "group relative flex items-center gap-4 rounded-xl px-3 py-3 text-sm font-medium transition-all duration-300",
                     "hover:bg-zinc-100 dark:hover:bg-zinc-900",
@@ -155,34 +156,22 @@ export function Sidebar({ userRole = "MANAGER" }: SidebarProps) {
             })}
           </div>
 
-          {/* --- CARD PROMO (Opcional - só Desktop Expandido) --- */}
+          {/* --- USAGE CARD (Novo Componente) --- */}
+          {/* Só renderiza se a sidebar estiver expandida e tiver dados */}
           <AnimatePresence>
-            {!isCollapsed && !isMobile && userRole !== "ADMIN" && (
-                <motion.div 
-                  initial={{ opacity: 0, height: 0 }}
-                  animate={{ opacity: 1, height: "auto" }}
-                  exit={{ opacity: 0, height: 0 }}
-                  className="mb-6 overflow-hidden"
-                >
-                <div className="relative rounded-2xl bg-gradient-to-br from-zinc-900 to-zinc-800 p-4 group">
-                    <div className="absolute -right-4 -top-4 h-24 w-24 rounded-full bg-amber-500/20 blur-2xl transition-all group-hover:bg-amber-500/30" />
-                    <div className="relative z-10">
-                    <div className="flex items-center gap-2 mb-2 text-amber-500">
-                        <Zap className="h-4 w-4 fill-amber-500" />
-                        <span className="text-xs font-bold uppercase tracking-wider">Pro</span>
-                    </div>
-                    <p className="text-xs text-zinc-400 mb-3">Aumente seus limites.</p>
-                    <Button size="sm" className="w-full bg-amber-500 hover:bg-amber-600 text-white border-0 shadow-lg shadow-amber-900/20">
-                        Upgrade
-                    </Button>
-                    </div>
-                </div>
-                </motion.div>
+            {!isCollapsed && hasPlanData && usageData && (
+              <motion.div 
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: "auto" }}
+                exit={{ opacity: 0, height: 0 }}
+              >
+                <UsageCard usageData={usageData} />
+              </motion.div>
             )}
-            </AnimatePresence>
+          </AnimatePresence>
 
           {/* --- FOOTER --- */}
-          <div className="mt-auto border-t border-zinc-100 dark:border-zinc-800 pt-4 space-y-2">
+          <div className="mt-2 border-t border-zinc-100 dark:border-zinc-800 pt-3 space-y-1">
             <Link
                href="/dashboard/help"
                className={cn(
@@ -192,27 +181,26 @@ export function Sidebar({ userRole = "MANAGER" }: SidebarProps) {
             >
                <LifeBuoy className="h-5 w-5 shrink-0" />
                <AnimatePresence>
-                  {(isMobile || !isCollapsed) && (
-                    <motion.span
-                      initial={{ opacity: 0, width: 0 }}
-                      animate={{ opacity: 1, width: "auto" }}
-                      exit={{ opacity: 0, width: 0 }}
-                    >
-                      Suporte
-                    </motion.span>
-                  )}
+                 {(isMobile || !isCollapsed) && (
+                   <motion.span
+                     initial={{ opacity: 0, width: 0 }}
+                     animate={{ opacity: 1, width: "auto" }}
+                     exit={{ opacity: 0, width: 0 }}
+                   >
+                     Suporte
+                   </motion.span>
+                 )}
                </AnimatePresence>
             </Link>
 
-             <Button
-              variant="ghost"
-              className={cn(
-                "flex w-full items-center gap-3 rounded-xl px-3 py-2 text-sm font-medium text-zinc-500 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/10 justify-start",
-                !isMobile && isCollapsed && "justify-center px-0"
-              )}
-            >
-              <LogOut className="h-5 w-5 shrink-0" />
-              <AnimatePresence>
+             <button
+               className={cn(
+                 "flex w-full items-center gap-3 rounded-xl px-3 py-2 text-sm font-medium text-zinc-500 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/10 justify-start transition-colors",
+                 !isMobile && isCollapsed && "justify-center px-0"
+               )}
+             >
+               <LogOut className="h-5 w-5 shrink-0" />
+               <AnimatePresence>
                   {(isMobile || !isCollapsed) && (
                     <motion.span
                       initial={{ opacity: 0, width: 0 }}
@@ -223,7 +211,7 @@ export function Sidebar({ userRole = "MANAGER" }: SidebarProps) {
                     </motion.span>
                   )}
                </AnimatePresence>
-            </Button>
+            </button>
           </div>
         </div>
       </aside>

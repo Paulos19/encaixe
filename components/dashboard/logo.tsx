@@ -35,8 +35,8 @@ export function Logo({ isCollapsed }: LogoProps) {
                 Já
               </span>
             </h1>
-            <span className="text-[10px] font-medium uppercase tracking-[0.2em] text-zinc-400 dark:text-zinc-500">
-              Solutions
+            <span className="text-[10px] font-medium tracking-[0.2em] text-zinc-400 dark:text-zinc-500">
+              Lista de Espera Inteligente
             </span>
           </motion.div>
         )}
