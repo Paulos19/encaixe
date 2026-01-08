@@ -19,6 +19,18 @@ model User {
   email         String    @unique
   password      String?
   role          Role      @default(MANAGER)
+  
+  // --- NOVOS CAMPOS PARA O STRIPE & LIMITES ---
+  plan                   Plan      @default(FREE)
+  stripeCustomerId       String?   @unique // O ID do cliente no Stripe (cus_...)
+  stripeSubscriptionId   String?   @unique // O ID da assinatura ativa (sub_...)
+  stripePriceId          String?           // Qual plano ele assina (price_...)
+  stripeCurrentPeriodEnd DateTime?         // Quando expira/renova
+  
+  messageLimit           Int       @default(10) // Limite do plano (ex: 100, 300)
+  messagesSent           Int       @default(0)  // Contador de uso no ciclo atual
+  // --------------------------------------------
+
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
@@ -88,4 +100,11 @@ enum EntryStatus {
   DECLINED    // Paciente recusou
   EXPIRED     // Tempo esgotou sem resposta
   CANCELED    // Removido manualmente
+}
+
+enum Plan {
+  FREE
+  ESSENTIAL
+  PRO
+  PLUS
 }

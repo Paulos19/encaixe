@@ -48,7 +48,29 @@ export async function triggerSlot(formData: FormData) {
   const { waitlistId, slotTime } = validated.data;
 
   try {
-    // 3. Busca o próximo paciente da fila (Lógica FIFO)
+    // 3. Verificação de Quota e Plano (Lógica Stripe)
+    // Buscamos o usuário para checar se ele ainda tem créditos no mês
+    const user = await prisma.user.findUnique({
+      where: { email: session.user.email },
+      select: { 
+        id: true, 
+        messagesSent: true, 
+        messageLimit: true 
+      }
+    });
+
+    if (!user) {
+      return { error: "Usuário não encontrado." };
+    }
+
+    // Se o usuário já atingiu o limite do plano
+    if (user.messagesSent >= user.messageLimit) {
+      return { 
+        error: "Limite mensal atingido! Faça o upgrade do seu plano para continuar enviando mensagens." 
+      };
+    }
+
+    // 4. Busca o próximo paciente da fila (Lógica FIFO)
     // Pega o paciente com status WAITING que entrou há mais tempo (addedAt asc)
     const nextEntry = await prisma.waitlistEntry.findFirst({
       where: {
@@ -67,7 +89,7 @@ export async function triggerSlot(formData: FormData) {
       return { error: "A fila está vazia! Adicione pacientes antes de disparar." };
     }
 
-    // 4. Atualiza status para NOTIFIED
+    // 5. Atualiza status para NOTIFIED
     // Isso impede que o mesmo paciente receba disparos duplicados se o botão for clicado 2x rápido
     await prisma.waitlistEntry.update({
       where: { id: nextEntry.id },
@@ -77,7 +99,8 @@ export async function triggerSlot(formData: FormData) {
       }
     });
 
-    // 5. Prepara os dados para o n8n
+    // 6. Prepara os dados para o n8n
+    // Sugestão: Mover para variável de ambiente no futuro (process.env.N8N_WEBHOOK_URL)
     const webhookUrl = 'https://n8n-n8n.qqfurw.easypanel.host/webhook/disparo-encaixe';
     const cleanPhone = sanitizePhone(nextEntry.patient.phone);
 
@@ -89,7 +112,7 @@ export async function triggerSlot(formData: FormData) {
       slotTime: slotTime
     };
 
-    // 6. Dispara o Webhook do n8n
+    // 7. Dispara o Webhook do n8n
     const response = await fetch(webhookUrl, {
       method: 'POST',
       headers: {
@@ -103,12 +126,20 @@ export async function triggerSlot(formData: FormData) {
       console.error("Erro n8n:", errorText);
       
       // Opcional: Reverter o status se o envio falhar?
-      // Por segurança, mantemos NOTIFIED para o humano verificar manualmente se a msg saiu,
-      // evitando spam de mensagens se o erro for apenas de timeout de resposta.
+      // Por segurança, mantemos NOTIFIED para o humano verificar manualmente se a msg saiu.
       return { error: "Falha ao comunicar com o serviço de mensagens, mas o status foi atualizado." };
     }
 
-    // 7. Atualiza a UI
+    // 8. Sucesso! Decrementa a quota (incrementa o uso)
+    // Só cobramos se o n8n aceitou o pedido.
+    await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        messagesSent: { increment: 1 }
+      }
+    });
+
+    // 9. Atualiza a UI
     revalidatePath(`/dashboard/waitlists/${waitlistId}`);
     
     return { 
