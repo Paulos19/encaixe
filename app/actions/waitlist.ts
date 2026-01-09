@@ -14,29 +14,32 @@ const CreateWaitlistSchema = z.object({
 const TriggerSlotSchema = z.object({
   waitlistId: z.string().cuid(),
   slotTime: z.string().min(1, "Informe o horário da vaga"),
+  slotId: z.string().optional(), // NOVO: Permite receber o ID do slot
 });
 
-// --- ACTIONS PÚBLICAS (CHAMADAS PELO FRONTEND) ---
+// --- HELPER: Formatação de Telefone ---
+function formatPhoneForWhatsapp(phone: string): string {
+  const cleaned = phone.replace(/\D/g, '');
+  // Adiciona 55 se for número brasileiro padrão (10 ou 11 dígitos)
+  if (cleaned.length === 10 || cleaned.length === 11) {
+    return `55${cleaned}`;
+  }
+  return cleaned;
+}
+
+// --- ACTIONS PÚBLICAS ---
 
 export async function createWaitlist(formData: FormData) {
   const session = await auth();
-  
-  if (!session?.user?.email) {
-    return { error: "Não autorizado" };
-  }
+  if (!session?.user?.email) return { error: "Não autorizado" };
 
   const data = Object.fromEntries(formData.entries());
   const validated = CreateWaitlistSchema.safeParse(data);
 
-  if (!validated.success) {
-    return { error: "Dados inválidos" };
-  }
+  if (!validated.success) return { error: "Dados inválidos" };
 
   try {
-    const user = await prisma.user.findUnique({
-      where: { email: session.user.email },
-    });
-
+    const user = await prisma.user.findUnique({ where: { email: session.user.email } });
     if (!user) return { error: "Usuário não encontrado" };
 
     await prisma.waitlist.create({
@@ -50,7 +53,6 @@ export async function createWaitlist(formData: FormData) {
     revalidatePath('/dashboard/waitlists');
     return { success: true };
   } catch (error) {
-    console.error(error);
     return { error: "Erro ao criar lista" };
   }
 }
@@ -68,7 +70,8 @@ export async function triggerManualSlot(formData: FormData) {
   // Chama a lógica compartilhada
   const result = await findAndNotifyNextPatient(
     validated.data.waitlistId,
-    validated.data.slotTime
+    validated.data.slotTime,
+    validated.data.slotId // Repassa o ID se existir
   );
 
   if (result.success) {
@@ -80,10 +83,10 @@ export async function triggerManualSlot(formData: FormData) {
 }
 
 // --- LÓGICA COMPARTILHADA (CORE DO SISTEMA) ---
-// Exportada para ser usada também pelo Webhook de Decline/Expire
-export async function findAndNotifyNextPatient(waitlistId: string, slotTime: string) {
+// Agora aceita slotId opcional
+export async function findAndNotifyNextPatient(waitlistId: string, slotTime: string, slotId?: string) {
   try {
-    // 1. Validar a Lista e o Dono (Limites de Plano)
+    // 1. Validar a Lista e o Dono
     const waitlist = await prisma.waitlist.findUnique({
       where: { id: waitlistId },
       include: { owner: true }
@@ -93,7 +96,7 @@ export async function findAndNotifyNextPatient(waitlistId: string, slotTime: str
 
     const owner = waitlist.owner;
     
-    // Verificação de Limites (Billing)
+    // Verificação de Limites
     if (owner.messagesSent >= owner.messageLimit) {
       console.warn(`[LIMIT] Usuário ${owner.email} atingiu o limite.`);
       return { error: "Limite de mensagens do plano atingido." };
@@ -116,16 +119,14 @@ export async function findAndNotifyNextPatient(waitlistId: string, slotTime: str
       return { error: "Fila vazia! Ninguém para chamar." };
     }
 
-    // 3. Disparar para o n8n (Webhook de Disparo)
-    const n8nUrl = process.env.N8N_WEBHOOK_URL; // Defina isso no .env
-    
-    if (!n8nUrl) {
-      console.error("N8N_WEBHOOK_URL não definida");
-      return { error: "Erro de configuração do servidor" };
-    }
+    // 3. Disparar para o n8n
+    const n8nUrl = process.env.N8N_WEBHOOK_URL;
+    if (!n8nUrl) return { error: "Erro de configuração do servidor" };
 
-    // Disparo assíncrono (não travamos o banco esperando o n8n)
-    // Importante: Enviamos slotTime para o n8n passar para o Redis
+    // Formatação do telefone
+    const formattedPhone = formatPhoneForWhatsapp(nextEntry.patient.phone);
+
+    // Disparo assíncrono
     await fetch(n8nUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -133,14 +134,13 @@ export async function findAndNotifyNextPatient(waitlistId: string, slotTime: str
         waitlistId,
         patientId: nextEntry.patient.id,
         patientName: nextEntry.patient.name,
-        phone: nextEntry.patient.phone,
-        slotTime: slotTime
+        phone: formattedPhone,
+        slotTime: slotTime,
+        slotId: slotId || null // <--- Enviamos o ID para o n8n guardar no Redis
       })
     });
 
     // 4. Atualizar Estado no Banco
-    // Marcamos como NOTIFIED para ele não ser pego na próxima query
-    // Incrementamos o uso do dono da clínica
     await prisma.$transaction([
       prisma.waitlistEntry.update({
         where: { id: nextEntry.id },
