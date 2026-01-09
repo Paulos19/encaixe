@@ -4,87 +4,24 @@ import { auth } from '@/auth';
 import { prisma } from '@/lib/prisma';
 import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
+import { clinicService } from '@/lib/clinic'; // Importe o service atualizado
 
-// --- Schemas de Validação ---
-
-// Schema para adicionar diretamente à lista de espera (mantido)
-const AddPatientToWaitlistSchema = z.object({
-  name: z.string().min(2, "Nome obrigatório"),
-  phone: z.string().min(10, "Telefone inválido"),
-  notes: z.string().optional(),
-  waitlistId: z.string().cuid(),
-});
-
-// Schema para criação geral de paciente (novo)
-const CreatePatientSchema = z.object({
-  name: z.string().min(2, "Nome obrigatório"),
-  phone: z.string().min(10, "Telefone inválido"),
-  notes: z.string().optional(),
-});
-
-// --- Server Actions ---
-
-/**
- * Cria um novo paciente na base geral do médico.
- * Usado na tela dashboard/patients.
- */
-export async function createPatient(formData: FormData) {
-  const session = await auth();
-  if (!session?.user?.email) return { error: "Não autorizado" };
-
-  const rawData = {
-    name: formData.get('name'),
-    phone: formData.get('phone'),
-    notes: formData.get('notes'),
-  };
-
-  const validated = CreatePatientSchema.safeParse(rawData);
-
-  if (!validated.success) {
-    return { error: "Dados inválidos. Verifique o telefone e o nome." };
-  }
-
-  const { name, phone, notes } = validated.data;
-
-  try {
-    const user = await prisma.user.findUnique({ where: { email: session.user.email } });
-    if (!user) return { error: "Usuário não encontrado" };
-
-    // Verifica se já existe um paciente com este telefone para este médico
-    const existingPatient = await prisma.patient.findFirst({
-        where: { 
-          managerId: user.id,
-          phone: phone 
-        }
-    });
-
-    if (existingPatient) {
-        return { error: "Já existe um paciente cadastrado com este telefone." };
-    }
-
-    // Cria o paciente
-    await prisma.patient.create({
-        data: {
-          name,
-          phone,
-          notes,
-          managerId: user.id
-        }
-    });
-
-    revalidatePath('/dashboard/patients');
-    return { success: true };
-
-  } catch (error: any) {
-    console.error("Erro ao criar paciente:", error);
-    return { error: "Erro interno ao cadastrar paciente." };
-  }
+// --- HELPER ---
+function formatPhoneForWhatsapp(phone: string | number): string {
+  const str = String(phone).replace(/\D/g, '');
+  if (str.length === 10 || str.length === 11) return `55${str}`;
+  return str;
 }
 
-/**
- * Adiciona um paciente a uma lista de espera específica.
- * Cria o paciente na base se ele ainda não existir.
- */
+// --- ACTIONS DE LEITURA ---
+
+// Busca convênios para o frontend (Client Component)
+export async function getInsurancesAction() {
+  return await clinicService.getHealthInsurances();
+}
+
+// --- ACTIONS DE ESCRITA ---
+
 export async function addPatientToWaitlist(formData: FormData) {
   const session = await auth();
   if (!session?.user?.email) return { error: "Não autorizado" };
@@ -93,80 +30,151 @@ export async function addPatientToWaitlist(formData: FormData) {
     name: formData.get('name'),
     phone: formData.get('phone'),
     notes: formData.get('notes'),
+    birthDate: formData.get('birthDate'), // Vem como YYYY-MM-DD do input date
+    insurance: formData.get('insurance'),
     waitlistId: formData.get('waitlistId'),
   };
-
-  const validated = AddPatientToWaitlistSchema.safeParse(rawData);
-
-  if (!validated.success) {
-    return { error: "Dados inválidos. Verifique o telefone." };
-  }
-
-  const { name, phone, notes, waitlistId } = validated.data;
 
   try {
     const user = await prisma.user.findUnique({ where: { email: session.user.email } });
     if (!user) return { error: "Usuário não encontrado" };
 
-    // 1. Verifica se a lista pertence ao usuário
-    const waitlist = await prisma.waitlist.findUnique({
-      where: { id: waitlistId, ownerId: user.id }
-    });
-    if (!waitlist) return { error: "Lista não encontrada" };
+    const formattedPhone = formatPhoneForWhatsapp(rawData.phone as string);
+    // Converte para ISO Date ou null se vazio
+    const birthDateISO = rawData.birthDate ? new Date(rawData.birthDate as string).toISOString() : null;
 
-    // 2. Transação: Busca/Cria Paciente -> Cria Entrada na Lista
+    // Transação para garantir integridade (Cria Paciente + Adiciona na Lista)
     await prisma.$transaction(async (tx) => {
-      // Tenta encontrar paciente pelo telefone para este médico
+      // 1. Upsert Paciente (Cria ou Atualiza se já existir pelo telefone)
       let patient = await tx.patient.findFirst({
-        where: { 
-          managerId: user.id,
-          phone: phone 
-        }
+        where: { managerId: user.id, phone: formattedPhone }
       });
 
-      // Se não existe, cria
-      if (!patient) {
-        patient = await tx.patient.create({
+      if (patient) {
+        // Atualiza dados (útil se o paciente mudou de convênio ou corrigiu nome)
+        patient = await tx.patient.update({
+          where: { id: patient.id },
           data: {
-            name,
-            phone,
-            notes,
-            managerId: user.id
+            name: rawData.name as string,
+            birthDate: birthDateISO,
+            insurance: rawData.insurance as string,
+            notes: rawData.notes as string
           }
         });
       } else {
-        // Se existe, não atualizamos os dados para preservar o histórico,
-        // a menos que você queira implementar uma lógica de atualização aqui.
+        patient = await tx.patient.create({
+          data: {
+            managerId: user.id,
+            name: rawData.name as string,
+            phone: formattedPhone,
+            birthDate: birthDateISO,
+            insurance: rawData.insurance as string,
+            notes: rawData.notes as string
+          }
+        });
       }
 
-      // 3. Verifica se já está nesta fila específica
+      // 2. Adiciona à Lista (se já não estiver lá)
       const existingEntry = await tx.waitlistEntry.findFirst({
         where: {
-            waitlistId: waitlist.id,
-            patientId: patient.id,
-            status: { notIn: ['CANCELED', 'EXPIRED', 'DECLINED'] } // Permite reentrar se saiu
-        }
-      });
-
-      if (existingEntry) {
-        throw new Error("Paciente já está nesta fila.");
-      }
-
-      // 4. Adiciona à fila
-      await tx.waitlistEntry.create({
-        data: {
-          waitlistId: waitlist.id,
+          waitlistId: rawData.waitlistId as string,
           patientId: patient.id,
-          status: 'WAITING'
+          status: { notIn: ['CANCELED', 'EXPIRED', 'DECLINED'] } // Permite reentrar se foi cancelado antes
         }
       });
+
+      if (!existingEntry) {
+        await tx.waitlistEntry.create({
+          data: {
+            waitlistId: rawData.waitlistId as string,
+            patientId: patient.id,
+            status: 'WAITING'
+          }
+        });
+      }
     });
 
-    revalidatePath(`/dashboard/waitlists/${waitlistId}`);
+    revalidatePath(`/dashboard/waitlists/${rawData.waitlistId}`);
     return { success: true };
 
   } catch (error: any) {
     console.error(error);
-    return { error: error.message || "Erro ao adicionar paciente." };
+    return { error: "Erro ao processar cadastro." };
+  }
+}
+
+/**
+ * IMPORTAÇÃO EM MASSA (Excel/CSV)
+ * Recebe array de objetos JSON direto do frontend
+ */
+export async function importPatientsFromCsv(waitlistId: string, patientsData: any[]) {
+  const session = await auth();
+  if (!session?.user?.email) return { error: "Não autorizado" };
+
+  try {
+    const user = await prisma.user.findUnique({ where: { email: session.user.email } });
+    if (!user) return { error: "Usuário não encontrado" };
+
+    let successCount = 0;
+    let errorCount = 0;
+
+    // Processa um por um para garantir validações individuais
+    for (const p of patientsData) {
+      try {
+        const phone = formatPhoneForWhatsapp(p.phone);
+        if (phone.length < 10) { errorCount++; continue; } // Pula inválidos
+
+        let birthDate = null;
+        if (p.birthDate) {
+            // Tenta converter formatos variados (Excel serial date ou string)
+            // Se vier string DD/MM/YYYY, precisa tratar
+            birthDate = new Date(p.birthDate).toISOString(); 
+        }
+
+        await prisma.$transaction(async (tx) => {
+          // Upsert Paciente
+          let patient = await tx.patient.findFirst({
+            where: { managerId: user.id, phone }
+          });
+
+          const patientData = {
+            managerId: user.id,
+            name: p.name,
+            phone,
+            birthDate,
+            insurance: p.insurance, // Nome do convênio vindo da planilha
+            notes: p.notes
+          };
+
+          if (!patient) {
+            patient = await tx.patient.create({ data: patientData });
+          } else {
+             // Opcional: Atualizar dados na importação também
+             patient = await tx.patient.update({ where: { id: patient.id }, data: patientData });
+          }
+
+          // Add na Lista
+          const entry = await tx.waitlistEntry.findFirst({
+            where: { waitlistId, patientId: patient.id, status: { notIn: ['CANCELED', 'EXPIRED', 'DECLINED'] } }
+          });
+
+          if (!entry) {
+            await tx.waitlistEntry.create({
+              data: { waitlistId, patientId: patient.id, status: 'WAITING' }
+            });
+          }
+        });
+        successCount++;
+      } catch (e) {
+        console.error("Falha ao importar linha:", p, e);
+        errorCount++;
+      }
+    }
+
+    revalidatePath(`/dashboard/waitlists/${waitlistId}`);
+    return { success: true, count: successCount, errors: errorCount };
+
+  } catch (error) {
+    return { error: "Erro crítico na importação." };
   }
 }

@@ -23,10 +23,13 @@ import {
   DropdownMenuTrigger,
   DropdownMenuSeparator
 } from "@/components/ui/dropdown-menu";
-import { MoreHorizontal, Phone, Clock, User as UserIcon, Calendar, CheckCircle2, AlertCircle } from "lucide-react";
+import { MoreHorizontal, Phone, Clock, User as UserIcon, Calendar, CheckCircle2, AlertCircle, FileText } from "lucide-react";
+import { Card, CardContent } from "@/components/ui/card";
+
+// Componentes da Funcionalidade
 import { AddPatientDialog } from "@/components/waitlist/add-patient-dialog";
 import { TriggerSlotDialog } from "@/components/waitlist/trigger-slot-dialog";
-import { Card, CardContent } from "@/components/ui/card";
+import { ImportPatientsDialog } from "@/components/waitlist/import-patients-dialog"; // Novo Componente
 
 interface PageProps {
   params: Promise<{ id: string }>;
@@ -84,7 +87,7 @@ export default async function WaitlistDetailsPage({ params }: PageProps) {
     <div className="space-y-6">
       
       {/* --- HEADER --- */}
-      <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-6 border-b border-zinc-200 dark:border-zinc-800 pb-6">
+      <div className="flex flex-col xl:flex-row xl:items-start xl:justify-between gap-6 border-b border-zinc-200 dark:border-zinc-800 pb-6">
         <div className="space-y-2">
             <div className="flex items-center gap-3">
                 <h1 className="text-3xl font-bold tracking-tight text-zinc-900 dark:text-zinc-50">
@@ -103,7 +106,14 @@ export default async function WaitlistDetailsPage({ params }: PageProps) {
             <Button variant="outline" className="border-zinc-200 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800">
                 Configurações
             </Button>
-            <AddPatientDialog waitlistId={waitlist.id} />
+            
+            {/* Grupo de Adição de Pacientes */}
+            <div className="flex items-center gap-2 bg-zinc-100 dark:bg-zinc-800/50 p-1 rounded-lg border border-zinc-200 dark:border-zinc-700">
+                <ImportPatientsDialog waitlistId={waitlist.id} />
+                <div className="w-px h-6 bg-zinc-300 dark:bg-zinc-700" />
+                <AddPatientDialog waitlistId={waitlist.id} />
+            </div>
+
             <TriggerSlotDialog 
                 waitlistId={waitlist.id} 
                 disabled={!waitlist.isActive || waitingCount === 0}
@@ -150,6 +160,7 @@ export default async function WaitlistDetailsPage({ params }: PageProps) {
               <TableHead className="w-[50px] text-center font-bold text-xs uppercase tracking-wider text-zinc-500">#</TableHead>
               <TableHead className="font-bold text-xs uppercase tracking-wider text-zinc-500">Paciente</TableHead>
               <TableHead className="font-bold text-xs uppercase tracking-wider text-zinc-500">Contato</TableHead>
+              <TableHead className="font-bold text-xs uppercase tracking-wider text-zinc-500">Convênio</TableHead>
               <TableHead className="font-bold text-xs uppercase tracking-wider text-zinc-500">Status</TableHead>
               <TableHead className="font-bold text-xs uppercase tracking-wider text-zinc-500">Tempo na Fila</TableHead>
               <TableHead className="text-right font-bold text-xs uppercase tracking-wider text-zinc-500">Ações</TableHead>
@@ -158,13 +169,13 @@ export default async function WaitlistDetailsPage({ params }: PageProps) {
           <TableBody>
             {waitlist.entries.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={6} className="h-48 text-center">
+                <TableCell colSpan={7} className="h-48 text-center">
                   <div className="flex flex-col items-center justify-center text-zinc-400 gap-3">
                     <div className="h-12 w-12 rounded-full bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center">
                         <UserIcon className="h-6 w-6 opacity-50" />
                     </div>
                     <p className="text-sm">Nenhum paciente nesta fila.</p>
-                    <p className="text-xs opacity-70">Use o botão "Adicionar Paciente" para começar.</p>
+                    <p className="text-xs opacity-70">Use os botões acima para adicionar pacientes.</p>
                   </div>
                 </TableCell>
               </TableRow>
@@ -195,6 +206,15 @@ export default async function WaitlistDetailsPage({ params }: PageProps) {
                           <Phone className="h-3 w-3 opacity-50" />
                           {entry.patient.phone}
                       </div>
+                    </TableCell>
+                    <TableCell>
+                        {entry.patient.insurance ? (
+                            <Badge variant="secondary" className="text-[10px] font-normal bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400">
+                                {entry.patient.insurance}
+                            </Badge>
+                        ) : (
+                            <span className="text-[10px] text-zinc-400">-</span>
+                        )}
                     </TableCell>
                     <TableCell>
                       <Badge 

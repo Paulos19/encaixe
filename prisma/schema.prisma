@@ -43,9 +43,14 @@ model User {
 model Patient {
   id    String  @id @default(cuid())
   name  String
-  phone String // Essencial para o WhatsApp (Formato E.164 recomendado)
+  phone String // Formatado com 55...
   email String?
-  notes String? // Obs: "Prefere manhã", "Cliente VIP"
+  notes String?
+  
+  // --- NOVOS CAMPOS ---
+  birthDate DateTime? // Importante para validação no CRM depois
+  insurance String?   // Nome do convênio (Ex: Unimed, Bradesco)
+  // --------------------
 
   managerId String
   manager   User   @relation(fields: [managerId], references: [id])
@@ -55,7 +60,6 @@ model Patient {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  // Garante que o mesmo médico não cadastre o mesmo telefone 2x
   @@unique([managerId, phone])
 }
 
