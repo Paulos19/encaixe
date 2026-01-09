@@ -26,7 +26,7 @@ export default async function MarketingPage() {
               
               <div className="inline-flex items-center gap-2 rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-1 text-sm text-amber-500 backdrop-blur-sm animate-in fade-in slide-in-from-bottom-4 duration-500">
                 <span className="flex h-2 w-2 rounded-full bg-amber-500 animate-pulse"></span>
-                Novidade: Integração com ClinicWeb e Feegow
+                Novidade: Integração com Clinic
               </div>
 
               <h1 className="text-4xl sm:text-5xl lg:text-7xl font-extrabold tracking-tight text-white animate-in fade-in slide-in-from-bottom-8 duration-700">
