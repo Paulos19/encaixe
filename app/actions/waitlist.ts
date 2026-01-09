@@ -162,3 +162,21 @@ export async function findAndNotifyNextPatient(waitlistId: string, slotTime: str
     return { error: "Erro interno ao processar fila." };
   }
 }
+
+export async function updateEntryStatus(entryId: string, status: string, waitlistId: string) {
+  const session = await auth();
+  if (!session?.user?.email) return { error: "Não autorizado" };
+
+  try {
+    await prisma.waitlistEntry.update({
+      where: { id: entryId },
+      data: { status: status as any } // Forçando o tipo para aceitar a string do Enum
+    });
+
+    revalidatePath(`/dashboard/waitlists/${waitlistId}`);
+    return { success: true };
+  } catch (error) {
+    console.error("Erro ao atualizar status:", error);
+    return { error: "Erro ao atualizar status." };
+  }
+}

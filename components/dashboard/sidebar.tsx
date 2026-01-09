@@ -19,6 +19,7 @@ import {
   BarChart3,    
   Headset, // Ícone para representar "Comercial" antes do hover
   X,
+  CalendarRange,
 } from "lucide-react";
 
 // --- ÍCONE WHATSAPP (SVG Otimizado) ---
@@ -41,6 +42,7 @@ const menuItems = [
   { title: "Listas de Espera", href: "/dashboard/waitlists", icon: CalendarDays, roles: ["MANAGER"] },
   { title: "Pacientes", href: "/dashboard/patients", icon: Users, roles: ["MANAGER"] },
   { title: "Assinatura", href: "/dashboard/settings/billing", icon: Settings, roles: ["MANAGER"] },
+  { title: "Agenda", href: "/dashboard/agenda", icon: CalendarRange, roles: ["MANAGER"] },
   { title: "Gestão de Clientes", href: "/admin/tenants", icon: BarChart3, roles: ["ADMIN"] },
   { title: "Logs do Sistema", href: "/admin/logs", icon: ShieldAlert, roles: ["ADMIN"] },
 ];

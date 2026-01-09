@@ -15,16 +15,7 @@ import {
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuTrigger,
-  DropdownMenuSeparator
-} from "@/components/ui/dropdown-menu";
 import { 
-  MoreHorizontal, 
   Phone, 
   Clock, 
   User as UserIcon, 
@@ -39,6 +30,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { AddPatientDialog } from "@/components/waitlist/add-patient-dialog";
 import { TriggerSlotDialog } from "@/components/waitlist/trigger-slot-dialog";
 import { ImportPatientsDialog } from "@/components/waitlist/import-patients-dialog";
+import { WaitlistEntryActions } from "@/components/waitlist/waitlist-entry-actions"; // <--- Importe Novo
 
 interface PageProps {
   params: Promise<{ id: string }>;
@@ -93,7 +85,6 @@ export default async function WaitlistDetailsPage({ params }: PageProps) {
   const confirmedToday = waitlist.entries.filter(e => e.status === 'CONFIRMED').length;
 
   return (
-    // Adicionado padding responsivo e controle de overflow horizontal da página
     <div className="space-y-6 max-w-[100vw] overflow-x-hidden">
       
       {/* --- HEADER --- */}
@@ -112,7 +103,6 @@ export default async function WaitlistDetailsPage({ params }: PageProps) {
             </p>
         </div>
         
-        {/* Barra de Ações Responsiva */}
         <div className="flex flex-wrap items-center gap-3 w-full xl:w-auto">
             <Button variant="outline" className="flex-1 sm:flex-none border-zinc-200 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800">
                 <Settings className="h-4 w-4 mr-2 sm:hidden" />
@@ -120,7 +110,6 @@ export default async function WaitlistDetailsPage({ params }: PageProps) {
                 <span className="sm:hidden">Config</span>
             </Button>
             
-            {/* Grupo de Botões unificados */}
             <div className="flex flex-1 sm:flex-none items-center justify-center gap-2 bg-zinc-100 dark:bg-zinc-800/50 p-1 rounded-lg border border-zinc-200 dark:border-zinc-700 min-w-fit">
                 <ImportPatientsDialog waitlistId={waitlist.id} />
                 <div className="w-px h-6 bg-zinc-300 dark:bg-zinc-700 hidden sm:block" />
@@ -136,7 +125,7 @@ export default async function WaitlistDetailsPage({ params }: PageProps) {
         </div>
       </div>
 
-      {/* --- QUICK STATS (Responsivo: 1 col mobile -> 2 col tablet -> 4 col desktop) --- */}
+      {/* --- QUICK STATS --- */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <Card className="bg-zinc-50/50 dark:bg-zinc-900/30 border-0 shadow-none ring-1 ring-zinc-200 dark:ring-zinc-800">
             <CardContent className="p-4 flex items-center gap-4">
@@ -167,10 +156,10 @@ export default async function WaitlistDetailsPage({ params }: PageProps) {
         </Card>
       </div>
 
-      {/* --- TABLE (Com Scroll Horizontal no Mobile) --- */}
+      {/* --- TABLE --- */}
       <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white/50 dark:bg-zinc-900/50 backdrop-blur-sm shadow-sm">
         <div className="overflow-x-auto w-full">
-          <Table className="min-w-[800px]"> {/* Força largura mínima para garantir layout tabular */}
+          <Table className="min-w-[800px]">
             <TableHeader className="bg-zinc-50/80 dark:bg-zinc-900/80">
               <TableRow className="hover:bg-transparent">
                 <TableHead className="w-[50px] text-center font-bold text-xs uppercase tracking-wider text-zinc-500">#</TableHead>
@@ -247,26 +236,14 @@ export default async function WaitlistDetailsPage({ params }: PageProps) {
                           </div>
                       </TableCell>
                       <TableCell className="text-right">
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <Button variant="ghost" className="h-8 w-8 p-0 opacity-50 group-hover:opacity-100 transition-opacity hover:bg-zinc-200 dark:hover:bg-zinc-700">
-                              <span className="sr-only">Abrir menu</span>
-                              <MoreHorizontal className="h-4 w-4" />
-                            </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end" className="w-48">
-                            <DropdownMenuLabel>Gerenciar</DropdownMenuLabel>
-                            <DropdownMenuItem>Editar Observações</DropdownMenuItem>
-                            <DropdownMenuItem>Ver Histórico</DropdownMenuItem>
-                            <DropdownMenuSeparator />
-                            <DropdownMenuItem>
-                              Mover para o Final
-                            </DropdownMenuItem>
-                            <DropdownMenuItem className="text-red-600 focus:bg-red-50 dark:focus:bg-red-900/20">
-                              Remover da Fila
-                            </DropdownMenuItem>
-                          </DropdownMenuContent>
-                        </DropdownMenu>
+                        
+                        {/* --- AQUI ENTRA O NOVO COMPONENTE DE AÇÕES --- */}
+                        <WaitlistEntryActions 
+                          entryId={entry.id} 
+                          currentStatus={entry.status}
+                          waitlistId={waitlist.id} 
+                        />
+
                       </TableCell>
                     </TableRow>
                   );
