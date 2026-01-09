@@ -4,7 +4,7 @@ import { auth } from '@/auth';
 import { prisma } from '@/lib/prisma';
 import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
-import { clinicService } from '@/lib/clinic'; // Importe o service atualizado
+import { clinicService } from '@/lib/clinic';
 
 // --- HELPER ---
 function formatPhoneForWhatsapp(phone: string | number): string {
@@ -14,14 +14,71 @@ function formatPhoneForWhatsapp(phone: string | number): string {
 }
 
 // --- ACTIONS DE LEITURA ---
-
-// Busca convênios para o frontend (Client Component)
 export async function getInsurancesAction() {
   return await clinicService.getHealthInsurances();
 }
 
 // --- ACTIONS DE ESCRITA ---
 
+/**
+ * Cria ou Atualiza um paciente na base geral (Sem vincular a lista de espera)
+ * Usado em /dashboard/patients
+ */
+export async function createPatient(formData: FormData) {
+  const session = await auth();
+  if (!session?.user?.email) return { error: "Não autorizado" };
+
+  const rawData = {
+    name: formData.get('name'),
+    phone: formData.get('phone'),
+    notes: formData.get('notes'),
+    birthDate: formData.get('birthDate'),
+    insurance: formData.get('insurance'),
+  };
+
+  try {
+    const user = await prisma.user.findUnique({ where: { email: session.user.email } });
+    if (!user) return { error: "Usuário não encontrado" };
+
+    const formattedPhone = formatPhoneForWhatsapp(rawData.phone as string);
+    const birthDateISO = rawData.birthDate ? new Date(rawData.birthDate as string).toISOString() : null;
+
+    // Upsert: Cria ou atualiza se o telefone já existir para este médico
+    await prisma.patient.upsert({
+      where: {
+        managerId_phone: {
+          managerId: user.id,
+          phone: formattedPhone
+        }
+      },
+      update: {
+        name: rawData.name as string,
+        notes: rawData.notes as string,
+        birthDate: birthDateISO,
+        insurance: rawData.insurance as string
+      },
+      create: {
+        managerId: user.id,
+        name: rawData.name as string,
+        phone: formattedPhone,
+        notes: rawData.notes as string,
+        birthDate: birthDateISO,
+        insurance: rawData.insurance as string
+      }
+    });
+
+    revalidatePath('/dashboard/patients');
+    return { success: true };
+  } catch (error) {
+    console.error("Erro createPatient:", error);
+    return { error: "Erro ao salvar paciente." };
+  }
+}
+
+/**
+ * Cria/Atualiza paciente E adiciona a uma lista de espera específica
+ * Usado em /dashboard/waitlists/[id]
+ */
 export async function addPatientToWaitlist(formData: FormData) {
   const session = await auth();
   if (!session?.user?.email) return { error: "Não autorizado" };
@@ -30,7 +87,7 @@ export async function addPatientToWaitlist(formData: FormData) {
     name: formData.get('name'),
     phone: formData.get('phone'),
     notes: formData.get('notes'),
-    birthDate: formData.get('birthDate'), // Vem como YYYY-MM-DD do input date
+    birthDate: formData.get('birthDate'),
     insurance: formData.get('insurance'),
     waitlistId: formData.get('waitlistId'),
   };
@@ -40,46 +97,35 @@ export async function addPatientToWaitlist(formData: FormData) {
     if (!user) return { error: "Usuário não encontrado" };
 
     const formattedPhone = formatPhoneForWhatsapp(rawData.phone as string);
-    // Converte para ISO Date ou null se vazio
     const birthDateISO = rawData.birthDate ? new Date(rawData.birthDate as string).toISOString() : null;
 
-    // Transação para garantir integridade (Cria Paciente + Adiciona na Lista)
     await prisma.$transaction(async (tx) => {
-      // 1. Upsert Paciente (Cria ou Atualiza se já existir pelo telefone)
+      // 1. Upsert Paciente
       let patient = await tx.patient.findFirst({
         where: { managerId: user.id, phone: formattedPhone }
       });
 
+      const patientData = {
+        managerId: user.id,
+        name: rawData.name as string,
+        phone: formattedPhone,
+        notes: rawData.notes as string,
+        birthDate: birthDateISO,
+        insurance: rawData.insurance as string
+      };
+
       if (patient) {
-        // Atualiza dados (útil se o paciente mudou de convênio ou corrigiu nome)
-        patient = await tx.patient.update({
-          where: { id: patient.id },
-          data: {
-            name: rawData.name as string,
-            birthDate: birthDateISO,
-            insurance: rawData.insurance as string,
-            notes: rawData.notes as string
-          }
-        });
+        patient = await tx.patient.update({ where: { id: patient.id }, data: patientData });
       } else {
-        patient = await tx.patient.create({
-          data: {
-            managerId: user.id,
-            name: rawData.name as string,
-            phone: formattedPhone,
-            birthDate: birthDateISO,
-            insurance: rawData.insurance as string,
-            notes: rawData.notes as string
-          }
-        });
+        patient = await tx.patient.create({ data: patientData });
       }
 
-      // 2. Adiciona à Lista (se já não estiver lá)
+      // 2. Add à Lista
       const existingEntry = await tx.waitlistEntry.findFirst({
         where: {
           waitlistId: rawData.waitlistId as string,
           patientId: patient.id,
-          status: { notIn: ['CANCELED', 'EXPIRED', 'DECLINED'] } // Permite reentrar se foi cancelado antes
+          status: { notIn: ['CANCELED', 'EXPIRED', 'DECLINED'] }
         }
       });
 
@@ -104,8 +150,7 @@ export async function addPatientToWaitlist(formData: FormData) {
 }
 
 /**
- * IMPORTAÇÃO EM MASSA (Excel/CSV)
- * Recebe array de objetos JSON direto do frontend
+ * IMPORTAÇÃO EM MASSA
  */
 export async function importPatientsFromCsv(waitlistId: string, patientsData: any[]) {
   const session = await auth();
@@ -118,42 +163,32 @@ export async function importPatientsFromCsv(waitlistId: string, patientsData: an
     let successCount = 0;
     let errorCount = 0;
 
-    // Processa um por um para garantir validações individuais
     for (const p of patientsData) {
       try {
         const phone = formatPhoneForWhatsapp(p.phone);
-        if (phone.length < 10) { errorCount++; continue; } // Pula inválidos
+        if (phone.length < 10) { errorCount++; continue; }
 
         let birthDate = null;
-        if (p.birthDate) {
-            // Tenta converter formatos variados (Excel serial date ou string)
-            // Se vier string DD/MM/YYYY, precisa tratar
-            birthDate = new Date(p.birthDate).toISOString(); 
-        }
+        if (p.birthDate) birthDate = new Date(p.birthDate).toISOString();
 
         await prisma.$transaction(async (tx) => {
-          // Upsert Paciente
-          let patient = await tx.patient.findFirst({
-            where: { managerId: user.id, phone }
-          });
+          let patient = await tx.patient.findFirst({ where: { managerId: user.id, phone } });
 
-          const patientData = {
+          const pData = {
             managerId: user.id,
             name: p.name,
             phone,
             birthDate,
-            insurance: p.insurance, // Nome do convênio vindo da planilha
+            insurance: p.insurance,
             notes: p.notes
           };
 
           if (!patient) {
-            patient = await tx.patient.create({ data: patientData });
+            patient = await tx.patient.create({ data: pData });
           } else {
-             // Opcional: Atualizar dados na importação também
-             patient = await tx.patient.update({ where: { id: patient.id }, data: patientData });
+             patient = await tx.patient.update({ where: { id: patient.id }, data: pData });
           }
 
-          // Add na Lista
           const entry = await tx.waitlistEntry.findFirst({
             where: { waitlistId, patientId: patient.id, status: { notIn: ['CANCELED', 'EXPIRED', 'DECLINED'] } }
           });
@@ -166,7 +201,6 @@ export async function importPatientsFromCsv(waitlistId: string, patientsData: an
         });
         successCount++;
       } catch (e) {
-        console.error("Falha ao importar linha:", p, e);
         errorCount++;
       }
     }
