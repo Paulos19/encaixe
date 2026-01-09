@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -14,12 +14,22 @@ import {
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Plus, Loader2 } from 'lucide-react';
-import { createPatient } from '@/app/actions/patient';
+import { createPatient, getInsurancesAction } from '@/app/actions/patient';
+import { toast } from 'sonner';
 
 export function CreatePatientDialog() {
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [insurances, setInsurances] = useState<{id: number, name: string}[]>([]);
+
+  // Carrega convênios ao abrir
+  useEffect(() => {
+    if (open) {
+      getInsurancesAction().then(data => setInsurances(data));
+    }
+  }, [open]);
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -31,11 +41,10 @@ export function CreatePatientDialog() {
     setLoading(false);
     
     if (result?.error) {
-      // Use alert ou seu componente de Toast preferido
-      alert(result.error);
+      toast.error(result.error);
     } else {
       setOpen(false);
-      // Opcional: toast.success("Paciente cadastrado!")
+      toast.success("Paciente cadastrado/atualizado com sucesso!");
     }
   }
 
@@ -47,28 +56,57 @@ export function CreatePatientDialog() {
             Novo Paciente
         </Button>
       </DialogTrigger>
-      <DialogContent className="sm:max-w-[425px]">
+      <DialogContent className="sm:max-w-[500px]">
         <form onSubmit={handleSubmit}>
           <DialogHeader>
             <DialogTitle>Cadastrar Novo Paciente</DialogTitle>
             <DialogDescription>
-              Adicione um paciente à sua base geral.
+              Adicione um paciente à sua base geral (CRM).
             </DialogDescription>
           </DialogHeader>
+          
           <div className="grid gap-4 py-4">
+            {/* Nome */}
             <div className="grid gap-2">
               <Label htmlFor="name">Nome Completo</Label>
               <Input id="name" name="name" required placeholder="Ex: Maria Silva" />
             </div>
-            <div className="grid gap-2">
-              <Label htmlFor="phone">WhatsApp (Apenas números)</Label>
-              <Input id="phone" name="phone" required placeholder="Ex: 11999998888" type="tel" />
+
+            {/* Telefone e Nascimento */}
+            <div className="grid grid-cols-2 gap-4">
+                <div className="grid gap-2">
+                    <Label htmlFor="phone">WhatsApp</Label>
+                    <Input id="phone" name="phone" required placeholder="11999998888" type="tel" />
+                </div>
+                <div className="grid gap-2">
+                    <Label htmlFor="birthDate">Data Nascimento</Label>
+                    <Input id="birthDate" name="birthDate" type="date" />
+                </div>
             </div>
+
+            {/* Convênio */}
+            <div className="grid gap-2">
+                <Label htmlFor="insurance">Convênio</Label>
+                <Select name="insurance">
+                    <SelectTrigger>
+                        <SelectValue placeholder="Selecione ou deixe em branco" />
+                    </SelectTrigger>
+                    <SelectContent>
+                        <SelectItem value="PARTICULAR">Particular / Nenhum</SelectItem>
+                        {insurances.map(ins => (
+                            <SelectItem key={ins.id} value={ins.name}>{ins.name}</SelectItem>
+                        ))}
+                    </SelectContent>
+                </Select>
+            </div>
+
+            {/* Obs */}
             <div className="grid gap-2">
               <Label htmlFor="notes">Observações</Label>
               <Textarea id="notes" name="notes" placeholder="Ex: Paciente VIP, prefere manhã..." />
             </div>
           </div>
+
           <DialogFooter>
             <Button type="submit" disabled={loading} className="w-full bg-amber-600 hover:bg-amber-700">
               {loading ? (
