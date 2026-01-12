@@ -239,3 +239,33 @@ export async function deleteEntry(entryId: string, waitlistId: string) {
     return { error: "Erro ao remover paciente." };
   }
 }
+
+export async function deleteWaitlist(waitlistId: string) {
+  const session = await auth();
+  if (!session?.user?.email) return { error: "Não autorizado" };
+
+  try {
+    // 1. Verifica se a lista pertence ao usuário
+    const waitlist = await prisma.waitlist.findUnique({
+      where: { id: waitlistId },
+      include: { owner: true }
+    });
+
+    if (!waitlist) return { error: "Lista não encontrada" };
+    if (waitlist.owner.email !== session.user.email) {
+      return { error: "Você não tem permissão para excluir esta lista." };
+    }
+
+    // 2. Deleta (o cascade do Prisma deve limpar as entries automaticamente se configurado,
+    // mas por segurança o delete da Waitlist já é suficiente)
+    await prisma.waitlist.delete({
+      where: { id: waitlistId }
+    });
+
+    revalidatePath('/dashboard/waitlists');
+    return { success: true };
+  } catch (error) {
+    console.error("Erro ao deletar lista:", error);
+    return { error: "Erro ao excluir a lista. Tente novamente." };
+  }
+}
