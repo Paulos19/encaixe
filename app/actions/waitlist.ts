@@ -14,7 +14,7 @@ const CreateWaitlistSchema = z.object({
 const TriggerSlotSchema = z.object({
   waitlistId: z.string().cuid(),
   slotTime: z.string().min(1, "Informe o horário da vaga"),
-  slotId: z.string().optional(), // NOVO: Permite receber o ID do slot
+  slotId: z.string().optional(), // NOVO: Permite receber o ID do slot para validação
 });
 
 // --- HELPER: Formatação de Telefone ---
@@ -67,11 +67,29 @@ export async function triggerManualSlot(formData: FormData) {
 
   if (!validated.success) return { error: "Dados inválidos" };
 
+  // --- VALIDAÇÃO DE SEGURANÇA DO SLOT ---
+  // Se um ID de slot for passado, verificamos se ele é válido e está livre.
+  // Isso evita o problema de "ofertar data que não existe" ou duplicada.
+  if (validated.data.slotId) {
+    const slot = await prisma.agendaSlot.findUnique({
+      where: { id: validated.data.slotId }
+    });
+
+    if (!slot) {
+      return { error: "Horário não encontrado. Atualize a página." };
+    }
+    
+    if (slot.isBooked) {
+      return { error: "Este horário já foi ocupado por outro paciente." };
+    }
+  }
+  // ---------------------------------------
+
   // Chama a lógica compartilhada
   const result = await findAndNotifyNextPatient(
     validated.data.waitlistId,
     validated.data.slotTime,
-    validated.data.slotId // Repassa o ID se existir
+    validated.data.slotId // Repassa o ID validado para o fluxo do n8n
   );
 
   if (result.success) {
@@ -83,7 +101,6 @@ export async function triggerManualSlot(formData: FormData) {
 }
 
 // --- LÓGICA COMPARTILHADA (CORE DO SISTEMA) ---
-// Agora aceita slotId opcional
 export async function findAndNotifyNextPatient(waitlistId: string, slotTime: string, slotId?: string) {
   try {
     // 1. Validar a Lista e o Dono
@@ -126,7 +143,7 @@ export async function findAndNotifyNextPatient(waitlistId: string, slotTime: str
     // Formatação do telefone
     const formattedPhone = formatPhoneForWhatsapp(nextEntry.patient.phone);
 
-    // Disparo assíncrono
+    // Disparo assíncrono para o Webhook do n8n
     await fetch(n8nUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -140,8 +157,9 @@ export async function findAndNotifyNextPatient(waitlistId: string, slotTime: str
       })
     });
 
-    // 4. Atualizar Estado no Banco
+    // 4. Atualizar Estado no Banco (Transação Atômica)
     await prisma.$transaction([
+      // Marca o paciente como NOTIFIED
       prisma.waitlistEntry.update({
         where: { id: nextEntry.id },
         data: { 
@@ -149,6 +167,7 @@ export async function findAndNotifyNextPatient(waitlistId: string, slotTime: str
           updatedAt: new Date()
         }
       }),
+      // Incrementa o contador de uso do cliente
       prisma.user.update({
         where: { id: owner.id },
         data: { messagesSent: { increment: 1 } }
@@ -178,5 +197,45 @@ export async function updateEntryStatus(entryId: string, status: string, waitlis
   } catch (error) {
     console.error("Erro ao atualizar status:", error);
     return { error: "Erro ao atualizar status." };
+  }
+}
+
+// --- NOVAS ACTIONS DE GESTÃO DA FILA ---
+
+// Move o paciente para o final da fila (reseta status para WAITING e atualiza data)
+export async function moveEntryToEnd(entryId: string, waitlistId: string) {
+  const session = await auth();
+  if (!session?.user?.email) return { error: "Não autorizado" };
+
+  try {
+    await prisma.waitlistEntry.update({
+      where: { id: entryId },
+      data: {
+        addedAt: new Date(), // Atualiza a data para AGORA (fim da fila FIFO)
+        status: 'WAITING'    // Reseta status para poder ser chamado novamente
+      }
+    });
+    revalidatePath(`/dashboard/waitlists/${waitlistId}`);
+    return { success: true };
+  } catch (error) {
+    console.error("Erro ao mover para o final:", error);
+    return { error: "Erro ao mover paciente." };
+  }
+}
+
+// Remove o paciente da fila permanentemente
+export async function deleteEntry(entryId: string, waitlistId: string) {
+  const session = await auth();
+  if (!session?.user?.email) return { error: "Não autorizado" };
+
+  try {
+    await prisma.waitlistEntry.delete({
+      where: { id: entryId }
+    });
+    revalidatePath(`/dashboard/waitlists/${waitlistId}`);
+    return { success: true };
+  } catch (error) {
+    console.error("Erro ao remover da fila:", error);
+    return { error: "Erro ao remover paciente." };
   }
 }

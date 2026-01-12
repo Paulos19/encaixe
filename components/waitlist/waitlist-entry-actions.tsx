@@ -15,8 +15,9 @@ import {
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
 } from "@/components/ui/dropdown-menu";
-import { MoreHorizontal, Loader2, RefreshCw } from "lucide-react";
-import { updateEntryStatus } from "@/app/actions/waitlist";
+import { MoreHorizontal, Loader2, RefreshCw, ArrowDownToLine, Trash2 } from "lucide-react";
+// Importando as novas actions aqui:
+import { updateEntryStatus, moveEntryToEnd, deleteEntry } from "@/app/actions/waitlist";
 import { toast } from "sonner";
 
 interface WaitlistEntryActionsProps {
@@ -37,6 +38,7 @@ const statuses = [
 export function WaitlistEntryActions({ entryId, currentStatus, waitlistId }: WaitlistEntryActionsProps) {
   const [loading, setLoading] = useState(false);
 
+  // Alterar Status
   const handleStatusChange = async (newStatus: string) => {
     if (loading || newStatus === currentStatus) return;
     
@@ -51,6 +53,38 @@ export function WaitlistEntryActions({ entryId, currentStatus, waitlistId }: Wai
     }
   };
 
+  // Mover para o Final
+  const handleMoveToEnd = async () => {
+    if (loading) return;
+    setLoading(true);
+    const result = await moveEntryToEnd(entryId, waitlistId);
+    setLoading(false);
+
+    if (result.error) {
+        toast.error(result.error);
+    } else {
+        toast.success("Paciente movido para o final da fila");
+    }
+  };
+
+  // Excluir
+  const handleDelete = async () => {
+    if (loading) return;
+    
+    // Pequena confirmação visual opcional (ou direta)
+    if(!confirm("Tem certeza que deseja remover este paciente da fila?")) return;
+
+    setLoading(true);
+    const result = await deleteEntry(entryId, waitlistId);
+    setLoading(false);
+
+    if (result.error) {
+        toast.error(result.error);
+    } else {
+        toast.success("Paciente removido da fila");
+    }
+  };
+
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -62,7 +96,6 @@ export function WaitlistEntryActions({ entryId, currentStatus, waitlistId }: Wai
       <DropdownMenuContent align="end" className="w-56">
         <DropdownMenuLabel>Gerenciar Paciente</DropdownMenuLabel>
         <DropdownMenuItem disabled>Editar Observações</DropdownMenuItem>
-        <DropdownMenuItem disabled>Ver Histórico</DropdownMenuItem>
         
         <DropdownMenuSeparator />
         
@@ -86,11 +119,14 @@ export function WaitlistEntryActions({ entryId, currentStatus, waitlistId }: Wai
 
         <DropdownMenuSeparator />
         
-        <DropdownMenuItem>
-          Mover para o Final
+        <DropdownMenuItem onClick={handleMoveToEnd} disabled={loading} className="gap-2">
+            <ArrowDownToLine className="h-4 w-4 text-zinc-500" />
+            Mover para o Final
         </DropdownMenuItem>
-        <DropdownMenuItem className="text-red-600 focus:bg-red-50 dark:focus:bg-red-900/20">
-          Remover da Fila
+        
+        <DropdownMenuItem onClick={handleDelete} disabled={loading} className="text-red-600 focus:bg-red-50 dark:focus:bg-red-900/20 gap-2">
+           <Trash2 className="h-4 w-4" />
+           Remover da Fila
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
