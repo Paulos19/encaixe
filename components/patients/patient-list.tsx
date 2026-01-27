@@ -4,10 +4,8 @@ import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   Search, 
-  MoreHorizontal, 
   Phone, 
   History, 
-  User as UserIcon,
   Filter,
   Download,
   Calendar
@@ -15,25 +13,23 @@ import {
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
 import { Badge } from '@/components/ui/badge';
-import { Card } from '@/components/ui/card'; // Importar Card
+import { Card } from '@/components/ui/card';
 import { formatDistanceToNow } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { cn } from '@/lib/utils';
+// Importa o componente de ações inteligente criado anteriormente
+import { PatientActions } from './patient-actions';
 
-// ... (Interfaces Patient e PatientListProps mantêm-se iguais) ...
 interface Patient {
   id: string;
   name: string;
   phone: string;
+  // Campos adicionais para edição (opcionais pois podem vir null do banco)
+  email?: string | null;
+  notes?: string | null;
+  birthDate?: Date | null;
+  insurance?: string | null;
   createdAt: Date;
   _count: {
     entries: number;
@@ -53,7 +49,6 @@ export function PatientList({ patients: initialPatients }: PatientListProps) {
   );
 
   const getAvatarColor = (name: string) => {
-     // ... (mesma lógica de cores) ...
     const colors = [
         "text-amber-600 bg-amber-100 dark:bg-amber-900/30 dark:text-amber-400",
         "text-violet-600 bg-violet-100 dark:bg-violet-900/30 dark:text-violet-400",
@@ -63,31 +58,11 @@ export function PatientList({ patients: initialPatients }: PatientListProps) {
     return colors[name.length % colors.length];
   };
 
-  // Componente de ações para reutilizar (Mobile e Desktop)
-  const PatientActions = () => (
-    <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="icon" className="h-8 w-8 text-zinc-400 hover:text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-900/20">
-                <MoreHorizontal className="h-4 w-4" />
-            </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-48">
-            <DropdownMenuLabel>Gerenciar</DropdownMenuLabel>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem>Editar Dados</DropdownMenuItem>
-            <DropdownMenuItem>Ver Histórico</DropdownMenuItem>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem className="text-red-500">Excluir</DropdownMenuItem>
-        </DropdownMenuContent>
-    </DropdownMenu>
-  );
-
   return (
     <div className="space-y-4">
       
       {/* --- BARRA DE FERRAMENTAS --- */}
       <div className="flex flex-col md:flex-row gap-3 md:gap-4 justify-between items-start md:items-center bg-white dark:bg-zinc-900/50 p-3 md:p-2 rounded-2xl border border-zinc-200 dark:border-zinc-800 shadow-sm backdrop-blur-sm">
-         {/* ... (Busca e botões mantêm-se iguais, já estavam bons) ... */}
          <div className="relative w-full md:w-96 group">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-400 group-focus-within:text-amber-500 transition-colors" />
             <Input 
@@ -131,7 +106,9 @@ export function PatientList({ patients: initialPatients }: PatientListProps) {
                                     <p className="text-xs text-zinc-500">{formatDistanceToNow(new Date(patient.createdAt), { locale: ptBR, addSuffix: true })}</p>
                                 </div>
                             </div>
-                            <PatientActions />
+                            
+                            {/* Actions Mobile (Componente Importado) */}
+                            <PatientActions patient={patient} />
                         </div>
                         
                         <div className="grid grid-cols-2 gap-2 mt-2">
@@ -157,7 +134,6 @@ export function PatientList({ patients: initialPatients }: PatientListProps) {
       <div className="hidden md:block rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/50 overflow-hidden shadow-sm">
         <div className="overflow-x-auto w-full">
             <table className="w-full">
-                {/* ... (Cabeçalho da tabela mantém-se igual) ... */}
                 <thead>
                     <tr className="border-b border-zinc-100 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-900/80">
                         <th className="px-6 py-4 text-left text-[11px] font-bold text-zinc-500 uppercase tracking-widest">Paciente</th>
@@ -177,7 +153,6 @@ export function PatientList({ patients: initialPatients }: PatientListProps) {
                             transition={{ delay: index * 0.05 }}
                             className="group hover:bg-zinc-50 dark:hover:bg-zinc-800/30 transition-colors"
                         >
-                            {/* ... (Células mantêm-se iguais, apenas substitua o dropdown pelo componente <PatientActions />) ... */}
                             <td className="px-6 py-4 whitespace-nowrap">
                                 <div className="flex items-center gap-3">
                                     <Avatar className="h-9 w-9 border border-zinc-200 dark:border-zinc-700/50">
@@ -223,7 +198,10 @@ export function PatientList({ patients: initialPatients }: PatientListProps) {
                             </td>
 
                             <td className="px-6 py-4 whitespace-nowrap text-right">
-                                <PatientActions />
+                                {/* Actions Desktop (Componente Importado) */}
+                                <div className="flex justify-end">
+                                    <PatientActions patient={patient} />
+                                </div>
                             </td>
                         </motion.tr>
                     ))}

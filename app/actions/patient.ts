@@ -75,6 +75,15 @@ export async function createPatient(formData: FormData) {
   }
 }
 
+const UpdatePatientSchema = z.object({
+  name: z.string().min(3, "Nome deve ter pelo menos 3 letras"),
+  phone: z.string().min(10, "Telefone inválido"),
+  email: z.string().email().optional().or(z.literal('')),
+  notes: z.string().optional(),
+  birthDate: z.string().optional(), // Recebe string do input type="date"
+  insurance: z.string().optional(),
+});
+
 /**
  * Cria/Atualiza paciente E adiciona a uma lista de espera específica
  * Usado em /dashboard/waitlists/[id]
@@ -212,3 +221,55 @@ export async function importPatientsFromCsv(waitlistId: string, patientsData: an
     return { error: "Erro crítico na importação." };
   }
 }
+
+export async function updatePatient(patientId: string, formData: FormData) {
+  const session = await auth();
+  if (!session?.user?.email) return { error: "Não autorizado" };
+
+  const data = Object.fromEntries(formData.entries());
+  const validated = UpdatePatientSchema.safeParse(data);
+
+  if (!validated.success) {
+    return { error: "Dados inválidos. Verifique os campos." };
+  }
+
+  try {
+    // Converter data de nascimento se existir
+    let birthDateIso = null;
+    if (validated.data.birthDate) {
+      birthDateIso = new Date(validated.data.birthDate);
+    }
+
+    await prisma.patient.update({
+      where: { id: patientId },
+      data: {
+        name: validated.data.name,
+        phone: validated.data.phone,
+        email: validated.data.email || null,
+        notes: validated.data.notes || null,
+        birthDate: birthDateIso,
+        insurance: validated.data.insurance || null,
+      },
+    });
+
+    revalidatePath('/dashboard/patients');
+    return { success: true };
+  } catch (error) {
+    console.error("Erro ao atualizar paciente:", error);
+    return { error: "Erro ao atualizar. Verifique se o telefone já existe." };
+  }
+}
+
+// Aproveite para adicionar a função de deletar se não tiver
+export async function deletePatient(patientId: string) {
+    const session = await auth();
+    if (!session?.user?.email) return { error: "Não autorizado" };
+  
+    try {
+      await prisma.patient.delete({ where: { id: patientId } });
+      revalidatePath('/dashboard/patients');
+      return { success: true };
+    } catch (error) {
+      return { error: "Erro ao excluir paciente." };
+    }
+  }
