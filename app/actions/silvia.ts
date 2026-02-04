@@ -22,7 +22,7 @@ export async function sendMessageToSilvia(history: ChatMessage[], newMessage: st
   }
 
   const N8N_WEBHOOK_URL = process.env.N8N_SILVIA_WEBHOOK_URL; // Ex: https://n8n.seudominio.com/webhook/silvia-chat
-  const API_KEY = process.env.N8N_API_SECRET; // A chave definida no Header Auth do n8n
+  const API_KEY = process.env.N8N_API_KEY; // A chave definida no Header Auth do n8n
 
   if (!N8N_WEBHOOK_URL) {
     console.error("N8N_SILVIA_WEBHOOK_URL não definida");
