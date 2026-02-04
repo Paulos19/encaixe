@@ -3,34 +3,54 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql" // Ou sqlite para dev rápido inicial
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
 enum Role {
-  USER // Cliente final da clínica (paciente) - se tiver portal futuro
-  MANAGER // Dono da clínica/Funcionário (Cliente do SaaS)
-  ADMIN // Você (Super Admin do SaaS)
+  USER    // Cliente final (paciente) - uso futuro
+  MANAGER // Dono da clínica (Seu Cliente)
+  ADMIN   // Você (Super Admin)
+}
+
+enum EntryStatus {
+  WAITING   // Aguardando
+  NOTIFIED  // Robô enviou msg
+  CONFIRMED // Encaixe realizado
+  DECLINED  // Recusou
+  EXPIRED   // Sem resposta
+  CANCELED  // Removido
+}
+
+enum Plan {
+  FREE
+  ESSENTIAL
+  PRO
+  PLUS
 }
 
 model User {
-  id       String  @id @default(cuid())
-  name     String?
-  email    String  @unique
-  password String?
-  role     Role    @default(MANAGER)
+  id           String    @id @default(cuid())
+  name         String?
+  email        String    @unique
+  password     String?
+  role         Role      @default(MANAGER)
+  image        String?
+  
+  // Histórico de Conversas com a Silvia
+  chatSessions ChatSession[]
 
-  // --- NOVOS CAMPOS PARA O STRIPE & LIMITES ---
+  // --- SAAS & STRIPE ---
   plan                   Plan      @default(FREE)
-  stripeCustomerId       String?   @unique // O ID do cliente no Stripe (cus_...)
-  stripeSubscriptionId   String?   @unique // O ID da assinatura ativa (sub_...)
-  stripePriceId          String? // Qual plano ele assina (price_...)
-  stripeCurrentPeriodEnd DateTime? // Quando expira/renova
+  stripeCustomerId       String?   @unique
+  stripeSubscriptionId   String?   @unique
+  stripePriceId          String?
+  stripeCurrentPeriodEnd DateTime?
   isTrial                Boolean   @default(false)
 
-  messageLimit Int @default(10) // Limite do plano (ex: 100, 300)
-  messagesSent Int @default(0) // Contador de uso no ciclo atual
-  // --------------------------------------------
+  messageLimit Int @default(10)
+  messagesSent Int @default(0)
+  // ---------------------
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -41,21 +61,20 @@ model User {
 }
 
 model Patient {
-  id    String  @id @default(cuid())
-  name  String
-  phone String // Formatado com 55...
-  email String?
-  notes String?
-  
-  // --- NOVOS CAMPOS ---
-  birthDate DateTime? // Importante para validação no CRM depois
-  insurance String?   // Nome do convênio (Ex: Unimed, Bradesco)
-  // --------------------
+  id        String  @id @default(cuid())
+  name      String
+  phone     String
+  email     String?
+  notes     String?
+
+  birthDate DateTime?
+  insurance String? // Convênio
 
   managerId String
-  manager   User   @relation(fields: [managerId], references: [id])
+  manager   User    @relation(fields: [managerId], references: [id])
 
-  entries WaitlistEntry[]
+  entries      WaitlistEntry[]
+  appointments AgendaSlot[]    // <--- RELAÇÃO NOVA: Histórico de agendamentos
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -65,7 +84,7 @@ model Patient {
 
 model Waitlist {
   id          String  @id @default(cuid())
-  name        String // Ex: "Dermatologia - Dra. Ana", "Cancelamentos Terça"
+  name        String
   description String?
 
   ownerId String
@@ -88,10 +107,7 @@ model WaitlistEntry {
   patient   Patient @relation(fields: [patientId], references: [id], onDelete: Cascade)
 
   status EntryStatus @default(WAITING)
-
-  // Para ordenação manual ou prioridade, se necessário. 
-  // Por padrão usaremos addedAt (FIFO)
-  priority Int @default(0)
+  priority Int         @default(0)
 
   addedAt   DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -107,7 +123,12 @@ model AgendaSlot {
   startTime DateTime
   endTime   DateTime
 
-  isBooked Boolean @default(false) // Se o robô já preencheu essa vaga
+  isBooked Boolean @default(false)
+
+  // --- CAMPO NOVO: VÍNCULO DO AGENDAMENTO ---
+  patientId String?
+  patient   Patient? @relation(fields: [patientId], references: [id])
+  // ------------------------------------------
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -115,18 +136,27 @@ model AgendaSlot {
   @@index([userId, startTime])
 }
 
-enum EntryStatus {
-  WAITING // Aguardando na fila
-  NOTIFIED // O robô enviou a mensagem
-  CONFIRMED // Encaixe realizado! (Vencedor)
-  DECLINED // Paciente recusou
-  EXPIRED // Tempo esgotou sem resposta
-  CANCELED // Removido manualmente
+model ChatSession {
+  id        String   @id @default(cuid())
+  userId    String
+  title     String   @default("Nova Conversa")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user     User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messages ChatMessage[]
+
+  @@index([userId])
 }
 
-enum Plan {
-  FREE
-  ESSENTIAL
-  PRO
-  PLUS
+model ChatMessage {
+  id        String   @id @default(cuid())
+  sessionId String
+  role      String   // 'user' | 'assistant'
+  content   String   @db.Text
+  createdAt DateTime @default(now())
+
+  session ChatSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId])
 }

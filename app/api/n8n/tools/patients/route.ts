@@ -9,9 +9,7 @@ const QuerySchema = z.object({
 
 export async function GET(req: Request) {
   const apiKey = req.headers.get('x-api-key');
-  if (apiKey !== process.env.N8N_API_KEY) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  }
+  if (apiKey !== process.env.N8N_API_KEY) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   try {
     const { searchParams } = new URL(req.url);
@@ -26,20 +24,24 @@ export async function GET(req: Request) {
         OR: [
           { name: { contains: params.search, mode: 'insensitive' } },
           { phone: { contains: params.search } },
+          { email: { contains: params.search, mode: 'insensitive' } },
         ]
       },
-      take: 3, // Limita para não estourar contexto da IA
+      take: 5,
+      // Selecionamos TUDO para a IA ter contexto (exceto dados sensíveis internos se houver)
       select: {
         id: true,
         name: true,
         phone: true,
+        email: true,
+        birthDate: true,
         insurance: true,
+        notes: true,
       }
     });
 
     return NextResponse.json(patients);
-
   } catch (error) {
-    return NextResponse.json({ error: 'Erro ao buscar paciente' }, { status: 400 });
+    return NextResponse.json({ error: 'Erro na busca' }, { status: 400 });
   }
 }

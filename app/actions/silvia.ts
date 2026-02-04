@@ -1,6 +1,8 @@
 'use server';
 
 import { auth } from '@/auth';
+import { prisma } from '@/lib/prisma';
+import { revalidatePath } from 'next/cache';
 
 export type ChatMessage = {
   role: 'user' | 'assistant';
@@ -11,65 +13,140 @@ export type ChatMessage = {
 interface SendMessageResponse {
   success: boolean;
   messages?: ChatMessage[];
+  sessionId?: string; // Retornamos o ID para redirecionar se for nova
   error?: string;
 }
 
-export async function sendMessageToSilvia(history: ChatMessage[], newMessage: string): Promise<SendMessageResponse> {
+export async function sendMessageToSilvia(
+  history: ChatMessage[], 
+  newMessage: string,
+  sessionId?: string // Opcional: Se null, cria nova conversa
+): Promise<SendMessageResponse> {
   const session = await auth();
 
-  if (!session?.user?.email || !session?.user?.id) {
-    return { success: false, error: "Não autorizado." };
+  if (!session?.user?.id) {
+    return { success: false, error: "Sessão expirada." };
   }
 
-  const N8N_WEBHOOK_URL = process.env.N8N_SILVIA_WEBHOOK_URL; // Ex: https://n8n.seudominio.com/webhook/silvia-chat
-  const API_KEY = process.env.N8N_API_KEY; // A chave definida no Header Auth do n8n
-
-  if (!N8N_WEBHOOK_URL) {
-    console.error("N8N_SILVIA_WEBHOOK_URL não definida");
-    return { success: false, error: "Erro de configuração do servidor." };
-  }
+  const userId = session.user.id;
+  let currentSessionId = sessionId;
 
   try {
-    // Dispara para o n8n
-    const response = await fetch(N8N_WEBHOOK_URL, {
+    // 1. Gestão da Sessão (Criar ou Usar Existente)
+    if (!currentSessionId) {
+      const newSession = await prisma.chatSession.create({
+        data: {
+          userId,
+          title: newMessage.slice(0, 30) + "...", // Título temporário
+        }
+      });
+      currentSessionId = newSession.id;
+    }
+
+    // 2. Persistir Mensagem do Usuário
+    await prisma.chatMessage.create({
+      data: {
+        sessionId: currentSessionId,
+        role: 'user',
+        content: newMessage,
+      }
+    });
+
+    // 3. Chamar n8n (Silvia)
+    const N8N_URL = process.env.N8N_SILVIA_WEBHOOK_URL;
+    const API_KEY = process.env.N8N_API_KEY;
+
+    if (!N8N_URL) throw new Error("Configuração do n8n ausente");
+
+    const response = await fetch(N8N_URL, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'x-api-key': API_KEY || '',
       },
       body: JSON.stringify({
-        userId: session.user.id, // CRÍTICO: Para filtrar dados no Postgres
+        userId,
+        sessionId: currentSessionId, // Importante para o n8n saber o contexto
+        message: newMessage,
         userEmail: session.user.email,
         userName: session.user.name,
-        message: newMessage,
-        // Opcional: enviar histórico se não usar memória Redis no n8n, 
-        // mas como configuramos Redis lá, enviamos apenas a nova.
       }),
+      cache: 'no-store'
     });
 
     if (!response.ok) {
-      throw new Error(`Erro n8n: ${response.statusText}`);
+      throw new Error(`Erro n8n: ${response.status}`);
     }
 
-    const data = await response.json();
+    // 4. Processar Resposta
+    const textResponse = await response.text();
+    let botText = "";
     
-    // O n8n deve retornar: { "text": "Resposta da IA..." } (Padrão do Output Parser do Agent)
-    // Ou se você configurou saída personalizada, ajuste aqui.
-    const botResponseText = typeof data === 'string' ? data : (data.text || data.output || data.response);
+    try {
+      const json = JSON.parse(textResponse);
+      botText = json.output || json.text || json.response || json.message || textResponse;
+    } catch {
+      botText = textResponse;
+    }
 
-    const botResponse: ChatMessage = {
-      role: 'assistant',
-      content: botResponseText,
-      timestamp: Date.now(),
-    };
+    if (!botText.trim()) botText = "Estou processando, mas fiquei sem resposta. Verifique meu status.";
+
+    // 5. Persistir Resposta da IA
+    await prisma.chatMessage.create({
+      data: {
+        sessionId: currentSessionId,
+        role: 'assistant',
+        content: botText,
+      }
+    });
+
+    // Atualiza o 'updatedAt' da sessão para ela subir na lista
+    await prisma.chatSession.update({
+      where: { id: currentSessionId },
+      data: { updatedAt: new Date() }
+    });
+
+    revalidatePath('/chat'); // Atualiza a sidebar
+    
+    // 6. Retornar Histórico Atualizado do Banco
+    // Buscamos tudo do banco para garantir sincronia perfeita
+    const dbMessages = await prisma.chatMessage.findMany({
+      where: { sessionId: currentSessionId },
+      orderBy: { createdAt: 'asc' }
+    });
 
     return {
       success: true,
-      messages: [...history, { role: 'user', content: newMessage, timestamp: Date.now() }, botResponse],
+      sessionId: currentSessionId,
+      messages: dbMessages.map(m => ({
+        role: m.role as 'user' | 'assistant',
+        content: m.content,
+        timestamp: m.createdAt.getTime()
+      }))
     };
 
-  } catch (error) {
-    console.error("Erro ao falar com Silvia (n8n):", error);
-    return { success: false, error: "Silvia está dormindo no momento. Tente já já." };
+  } catch (error: any) {
+    console.error("[Silvia Action]", error);
+    return { success: false, error: "Falha ao processar mensagem." };
   }
+}
+
+// Action extra para carregar histórico ao abrir a página
+export async function getChatHistory(sessionId: string) {
+  const session = await auth();
+  if (!session?.user?.id) return [];
+
+  const messages = await prisma.chatMessage.findMany({
+    where: { 
+      sessionId,
+      session: { userId: session.user.id } // Segurança: Só vê se for dono
+    },
+    orderBy: { createdAt: 'asc' }
+  });
+
+  return messages.map(m => ({
+    role: m.role as 'user' | 'assistant',
+    content: m.content,
+    timestamp: m.createdAt.getTime()
+  }));
 }

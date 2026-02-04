@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { MessageCircle, X, Send, Sparkles, Loader2 } from 'lucide-react';
+import { MessageCircle, X, Send, Sparkles, Maximize2 } from 'lucide-react'; // Maximize icon
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -11,54 +11,54 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { cn } from '@/lib/utils';
 import { ChatMessage, sendMessageToSilvia } from '@/app/actions/silvia';
 import { toast } from 'sonner';
+import { ChatMessageBubble } from '@/components/chat/chat-message-bubble'; // IMPORTANTE
+import Link from 'next/link';
+import { usePathname } from 'next/navigation';
 
 export function SilviaChatWidget() {
   const [isOpen, setIsOpen] = useState(false);
+  const pathname = usePathname();
+  
+  // Se já estivermos na página de chat, não mostra o widget
+  if (pathname.startsWith('/chat')) return null;
+
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
       role: 'assistant',
-      content: 'Olá! Sou a Silvia, sua assistente virtual. Como posso ajudar com sua agenda ou pacientes hoje?',
+      content: 'Olá! Como posso ajudar com a clínica hoje?',
       timestamp: Date.now(),
     },
   ]);
   const [inputValue, setInputValue] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const scrollRef = useRef<HTMLDivElement>(null);
+  const scrollViewportRef = useRef<HTMLDivElement>(null);
 
-  // Auto-scroll para o final
+  // Auto-scroll corrigido para ScrollArea do Shadcn
   useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollIntoView({ behavior: 'smooth' });
+    if (scrollViewportRef.current) {
+      const scrollElement = scrollViewportRef.current.querySelector('[data-radix-scroll-area-viewport]');
+      if (scrollElement) {
+        scrollElement.scrollTop = scrollElement.scrollHeight;
+      }
     }
-  }, [messages, isOpen]);
+  }, [messages, isOpen, isLoading]);
 
   const handleSendMessage = async () => {
     if (!inputValue.trim() || isLoading) return;
 
-    const userMsg: ChatMessage = {
-      role: 'user',
-      content: inputValue,
-      timestamp: Date.now(),
-    };
+    const text = inputValue.trim();
+    const tempUserMsg: ChatMessage = { role: 'user', content: text, timestamp: Date.now() };
 
-    // Otimistic update
-    const currentHistory = [...messages];
-    setMessages((prev) => [...prev, userMsg]);
+    setMessages(prev => [...prev, tempUserMsg]);
     setInputValue('');
     setIsLoading(true);
 
     try {
-      // Chama a Server Action
-      const response = await sendMessageToSilvia(currentHistory, userMsg.content);
-
+      const response = await sendMessageToSilvia([...messages, tempUserMsg], text);
       if (response.success && response.messages) {
-        // Atualiza com a resposta real do "backend"
-        // Nota: Na integração real, talvez a gente receba apenas a nova mensagem do bot
-        // para economizar banda, mas por enquanto substituímos o histórico.
-        const lastMsg = response.messages[response.messages.length - 1];
-        setMessages((prev) => [...prev, lastMsg]); 
+        setMessages(response.messages);
       } else {
-        toast.error("Erro ao falar com Silvia", { description: response.error });
+        toast.error("Erro", { description: response.error });
       }
     } catch (error) {
       toast.error("Erro de conexão");
@@ -68,95 +68,85 @@ export function SilviaChatWidget() {
   };
 
   return (
-    <div className="fixed bottom-6 right-6 z-50 flex flex-col items-end gap-4">
+    <div className="fixed bottom-6 right-6 z-[50] flex flex-col items-end gap-4">
       <AnimatePresence>
         {isOpen && (
           <motion.div
-            initial={{ opacity: 0, scale: 0.9, y: 20 }}
+            initial={{ opacity: 0, scale: 0.95, y: 10 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.9, y: 20 }}
-            transition={{ duration: 0.2 }}
+            exit={{ opacity: 0, scale: 0.95, y: 10 }}
             className="origin-bottom-right"
           >
-            <Card className="w-[380px] h-[500px] flex flex-col shadow-2xl border-primary/20 overflow-hidden">
-              {/* Header */}
-              <div className="bg-primary p-4 flex items-center justify-between text-primary-foreground">
+            <Card className="w-[380px] h-[600px] flex flex-col shadow-2xl border-primary/20 overflow-hidden flex flex-col">
+              {/* Header Reformulado */}
+              <div className="bg-primary px-4 py-3 flex items-center justify-between text-primary-foreground shadow-md z-10">
                 <div className="flex items-center gap-3">
                   <div className="relative">
-                    <Avatar className="h-10 w-10 border-2 border-white/20">
-                      <AvatarImage src="/silvia-avatar.png" /> {/* TODO: Adicionar asset */}
-                      <AvatarFallback className="bg-white/10 text-white">SI</AvatarFallback>
+                    <Avatar className="h-9 w-9 border-2 border-white/20 bg-white">
+                      <AvatarImage src="/silvia-avatar.png" />
+                      <AvatarFallback className="text-primary font-bold">SI</AvatarFallback>
                     </Avatar>
-                    <span className="absolute bottom-0 right-0 w-3 h-3 bg-green-400 border-2 border-primary rounded-full"></span>
+                    <span className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-emerald-400 border-2 border-primary rounded-full animate-pulse"></span>
                   </div>
                   <div>
-                    <h3 className="font-semibold text-sm">Silvia AI</h3>
-                    <p className="text-xs text-primary-foreground/80 flex items-center gap-1">
-                      <Sparkles className="w-3 h-3" /> Online
+                    <h3 className="font-semibold text-sm leading-tight">Silvia AI</h3>
+                    <p className="text-[10px] text-primary-foreground/80 font-medium flex items-center gap-1">
+                      <Sparkles className="w-2.5 h-2.5" /> Assistente Online
                     </p>
                   </div>
                 </div>
-                <Button 
-                  variant="ghost" 
-                  size="icon" 
-                  className="text-primary-foreground hover:bg-white/10"
-                  onClick={() => setIsOpen(false)}
-                >
-                  <X className="w-5 h-5" />
-                </Button>
+                <div className="flex items-center gap-1">
+                  <Link href="/chat">
+                    <Button variant="ghost" size="icon" className="h-8 w-8 text-primary-foreground hover:bg-white/20" title="Expandir para tela cheia">
+                      <Maximize2 className="w-4 h-4" />
+                    </Button>
+                  </Link>
+                  <Button 
+                    variant="ghost" size="icon" className="h-8 w-8 text-primary-foreground hover:bg-white/20"
+                    onClick={() => setIsOpen(false)}
+                  >
+                    <X className="w-5 h-5" />
+                  </Button>
+                </div>
               </div>
 
-              {/* Chat Area */}
-              <ScrollArea className="flex-1 p-4 bg-muted/30">
-                <div className="flex flex-col gap-4">
-                  {messages.map((msg, idx) => (
-                    <div
-                      key={idx}
-                      className={cn(
-                        "flex w-max max-w-[80%] flex-col gap-2 rounded-lg px-3 py-2 text-sm shadow-sm",
-                        msg.role === 'user'
-                          ? "ml-auto bg-primary text-primary-foreground"
-                          : "bg-background border border-border"
-                      )}
-                    >
-                      {msg.content}
-                      <span className={cn(
-                        "text-[10px] opacity-50",
-                        msg.role === 'user' ? "text-primary-foreground" : "text-muted-foreground"
-                      )}>
-                        {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                      </span>
-                    </div>
-                  ))}
-                  
-                  {isLoading && (
-                    <div className="flex items-center gap-2 text-muted-foreground text-xs ml-2">
-                      <Avatar className="h-6 w-6">
-                        <AvatarFallback>SI</AvatarFallback>
-                      </Avatar>
-                      <div className="bg-muted px-3 py-2 rounded-lg rounded-tl-none">
-                        <Loader2 className="w-4 h-4 animate-spin" />
+              {/* Chat Area com ScrollArea do Shadcn */}
+              <ScrollArea className="flex-1 bg-muted/10 p-0" ref={scrollViewportRef}>
+                <div className="flex flex-col py-4">
+                   {messages.map((msg, idx) => (
+                      // Reusando o componente inteligente, mas com padding menor pro widget
+                      <div key={idx} className="px-2">
+                        <ChatMessageBubble role={msg.role} content={msg.content} timestamp={msg.timestamp} />
                       </div>
-                    </div>
-                  )}
-                  <div ref={scrollRef} />
+                   ))}
+                   {isLoading && (
+                     <div className="px-6 py-4 text-xs text-muted-foreground animate-pulse">
+                       Silvia está pensando...
+                     </div>
+                   )}
                 </div>
               </ScrollArea>
 
               {/* Input Area */}
-              <div className="p-4 border-t bg-background">
+              <div className="p-3 border-t bg-background">
                 <form 
                   onSubmit={(e) => { e.preventDefault(); handleSendMessage(); }}
-                  className="flex gap-2"
+                  className="flex gap-2 items-end bg-muted/50 p-1.5 rounded-3xl border focus-within:ring-2 ring-primary/10 transition-all"
                 >
                   <Input 
                     value={inputValue}
                     onChange={(e) => setInputValue(e.target.value)}
-                    placeholder="Peça para agendar um encaixe..."
-                    className="flex-1 focus-visible:ring-primary/20"
+                    placeholder="Pergunte algo..."
+                    className="flex-1 border-0 bg-transparent focus-visible:ring-0 px-4 shadow-none h-10"
                     disabled={isLoading}
+                    autoFocus
                   />
-                  <Button type="submit" size="icon" disabled={isLoading || !inputValue.trim()}>
+                  <Button 
+                    type="submit" 
+                    size="icon" 
+                    disabled={!inputValue.trim() || isLoading}
+                    className="h-10 w-10 rounded-full shrink-0 shadow-sm"
+                  >
                     <Send className="w-4 h-4" />
                   </Button>
                 </form>
@@ -166,17 +156,14 @@ export function SilviaChatWidget() {
         )}
       </AnimatePresence>
 
-      {/* Toggle Button */}
-      <motion.div
-        whileHover={{ scale: 1.05 }}
-        whileTap={{ scale: 0.95 }}
-      >
+      {/* Botão Flutuante (Manteve o design) */}
+      <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
         <Button
           onClick={() => setIsOpen(!isOpen)}
           size="icon"
           className={cn(
-            "h-14 w-14 rounded-full shadow-lg transition-all duration-300",
-            isOpen ? "bg-muted-foreground hover:bg-muted-foreground/90" : "bg-primary hover:bg-primary/90"
+            "h-14 w-14 rounded-full shadow-xl transition-all duration-300 z-50",
+            isOpen ? "bg-muted-foreground rotate-90" : "bg-primary"
           )}
         >
           {isOpen ? <X className="h-6 w-6" /> : <MessageCircle className="h-7 w-7" />}
