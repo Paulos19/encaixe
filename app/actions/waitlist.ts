@@ -103,7 +103,7 @@ export async function triggerManualSlot(formData: FormData) {
 // --- LÓGICA COMPARTILHADA (CORE DO SISTEMA) ---
 export async function findAndNotifyNextPatient(waitlistId: string, slotTime: string, slotId?: string) {
   try {
-    // 1. Validar a Lista e o Dono
+    // 1. Busca a lista e o dono
     const waitlist = await prisma.waitlist.findUnique({
       where: { id: waitlistId },
       include: { owner: true }
@@ -113,38 +113,34 @@ export async function findAndNotifyNextPatient(waitlistId: string, slotTime: str
 
     const owner = waitlist.owner;
     
-    // Verificação de Limites
+    // Verifica limites do plano
     if (owner.messagesSent >= owner.messageLimit) {
-      console.warn(`[LIMIT] Usuário ${owner.email} atingiu o limite.`);
       return { error: "Limite de mensagens do plano atingido." };
     }
 
-    // 2. Encontrar o próximo paciente (FIFO + Prioridade)
+    // 2. Busca o próximo da fila (FIFO + Prioridade)
     const nextEntry = await prisma.waitlistEntry.findFirst({
       where: {
         waitlistId: waitlistId,
-        status: 'WAITING', // Só quem ainda não foi chamado
+        status: 'WAITING',
       },
       orderBy: [
-        { priority: 'desc' }, // Primeiro os VIPs
-        { addedAt: 'asc' },   // Depois quem chegou primeiro
+        { priority: 'desc' }, // Alta prioridade primeiro
+        { addedAt: 'asc' },   // Quem chegou antes primeiro
       ],
       include: { patient: true }
     });
 
     if (!nextEntry) {
-      return { error: "Fila vazia! Ninguém para chamar." };
+      return { error: "A fila está vazia ou todos já foram atendidos!" };
     }
 
-    // 3. Disparar para o n8n
-    const n8nUrl = process.env.N8N_WEBHOOK_URL;
-    if (!n8nUrl) return { error: "Erro de configuração do servidor" };
-
-    // Formatação do telefone
+    // 3. Prepara o envio para o n8n
+    const webhookUrl = "https://n8n-n8n.yyuhkk.easypanel.host/webhook/disparo-encaixe";
     const formattedPhone = formatPhoneForWhatsapp(nextEntry.patient.phone);
 
-    // Disparo assíncrono para o Webhook do n8n
-    await fetch(n8nUrl, {
+    // Dispara o Webhook
+    const response = await fetch(webhookUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -153,13 +149,18 @@ export async function findAndNotifyNextPatient(waitlistId: string, slotTime: str
         patientName: nextEntry.patient.name,
         phone: formattedPhone,
         slotTime: slotTime,
-        slotId: slotId || null // <--- Enviamos o ID para o n8n guardar no Redis
+        slotId: slotId || null
       })
     });
 
-    // 4. Atualizar Estado no Banco (Transação Atômica)
+    if (!response.ok) {
+      console.error("Falha no webhook n8n:", await response.text());
+      return { error: "Erro ao conectar com o serviço de mensagens." };
+    }
+
+    // 4. Atualiza o banco de dados
     await prisma.$transaction([
-      // Marca o paciente como NOTIFIED
+      // Marca paciente como NOTIFICADO (para não chamar o mesmo 2x)
       prisma.waitlistEntry.update({
         where: { id: nextEntry.id },
         data: { 
@@ -167,14 +168,17 @@ export async function findAndNotifyNextPatient(waitlistId: string, slotTime: str
           updatedAt: new Date()
         }
       }),
-      // Incrementa o contador de uso do cliente
+      // Incrementa contador de uso do médico
       prisma.user.update({
         where: { id: owner.id },
         data: { messagesSent: { increment: 1 } }
       })
     ]);
 
-    return { success: true };
+    return { 
+      success: true, 
+      patient: nextEntry.patient // Retorna dados para a Silvia usar na resposta
+    };
 
   } catch (error) {
     console.error("Erro no loop de disparo:", error);
