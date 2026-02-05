@@ -288,3 +288,32 @@ export async function getWaitlistsOptions() {
     return [];
   }
 }
+
+export async function getWaitlists() {
+  const session = await auth();
+  if (!session?.user?.email) return [];
+
+  try {
+    const user = await prisma.user.findUnique({
+      where: { email: session.user.email },
+      select: { id: true }
+    });
+
+    if (!user) return [];
+
+    const waitlists = await prisma.waitlist.findMany({
+      where: { ownerId: user.id },
+      orderBy: { createdAt: 'desc' },
+      include: {
+        _count: {
+          select: { entries: true }
+        }
+      }
+    });
+
+    return waitlists;
+  } catch (error) {
+    console.error("Erro ao buscar listas:", error);
+    return [];
+  }
+}

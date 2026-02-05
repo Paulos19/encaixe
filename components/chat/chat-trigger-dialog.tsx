@@ -1,68 +1,99 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { 
-  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle 
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
 } from '@/components/ui/dialog';
-import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Zap, Loader2, Megaphone, Calendar as CalendarIcon, ChevronLeft, ChevronRight, Keyboard, Sparkles } from 'lucide-react';
-import { getWaitlistsOptions, triggerManualSlot } from '@/app/actions/waitlist';
+import { 
+  Zap, 
+  Loader2, 
+  Sparkles, 
+  Calendar as CalendarIcon, 
+  Keyboard,
+  ChevronLeft,
+  ChevronRight,
+  List
+} from 'lucide-react';
 import { getWeekSlots, UnifiedSlot } from '@/app/actions/agenda';
+import { getWaitlists } from '@/app/actions/waitlist';
+import { cn } from '@/lib/utils';
+import { GradientText } from '@/components/ui/gradient-text';
+import { Button } from '@/components/ui/button';
+import { 
+  Select, 
+  SelectContent, 
+  SelectItem, 
+  SelectTrigger, 
+  SelectValue 
+} from '@/components/ui/select';
+import { 
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import { Calendar } from "@/components/ui/calendar"; 
 import { toast } from 'sonner';
 import { format, addDays } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { cn } from '@/lib/utils';
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Calendar } from "@/components/ui/calendar";
 
 interface ChatTriggerDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onSuccess: (listName: string, slotTime: string, mode: 'direct' | 'ai') => void; // Update signature
+  onSuccess: (listName: string, slotTime: string) => void;
 }
 
 export function ChatTriggerDialog({ open, onOpenChange, onSuccess }: ChatTriggerDialogProps) {
   const [loading, setLoading] = useState(false);
   
-  // Listas
-  const [lists, setLists] = useState<{ id: string; name: string }[]>([]);
-  const [fetchingLists, setFetchingLists] = useState(false);
-  const [selectedListId, setSelectedListId] = useState("");
-
-  // Agenda / Horário
-  const [mode, setMode] = useState<'agenda' | 'manual'>('agenda');
+  const [waitlists, setWaitlists] = useState<any[]>([]);
+  const [loadingLists, setLoadingLists] = useState(false);
+  
+  const [selectedListId, setSelectedListId] = useState<string>("");
   const [referenceDate, setReferenceDate] = useState<Date>(new Date());
   const [slots, setSlots] = useState<UnifiedSlot[]>([]);
   const [loadingSlots, setLoadingSlots] = useState(false);
+  const [mode, setMode] = useState<'agenda' | 'manual'>('agenda');
   const [selectedSlot, setSelectedSlot] = useState("");
-  const [manualSlotTime, setManualSlotTime] = useState("");
+  const [manualTime, setManualTime] = useState("");
 
-  // Inicialização
   useEffect(() => {
     if (open) {
-      setFetchingLists(true);
-      getWaitlistsOptions()
-        .then(setLists)
-        .finally(() => setFetchingLists(false));
+      fetchLists();
+      fetchSlots();
     }
   }, [open]);
 
-  // Busca Slots
   useEffect(() => {
     if (open && mode === 'agenda') {
       fetchSlots();
     }
-  }, [open, referenceDate, mode]);
+  }, [referenceDate, mode, open]);
+
+  async function fetchLists() {
+    setLoadingLists(true);
+    try {
+      const data = await getWaitlists();
+      setWaitlists(data.filter((l: any) => l.isActive));
+    } catch (error) {
+      console.error(error);
+      toast.error("Erro ao buscar listas.");
+    } finally {
+      setLoadingLists(false);
+    }
+  }
 
   async function fetchSlots() {
     setLoadingSlots(true);
     try {
       const data = await getWeekSlots(referenceDate);
       const now = new Date();
-      // Filtra futuros e não agendados
       const validSlots = data.filter(s => {
         const slotDate = new Date(s.startTime);
         return !s.isBooked && slotDate > now;
@@ -75,7 +106,30 @@ export function ChatTriggerDialog({ open, onOpenChange, onSuccess }: ChatTrigger
     }
   }
 
-  // Deduplicação de Slots para o Select
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    const finalSlotTime = mode === 'manual' ? manualTime : selectedSlot;
+    
+    if (!selectedListId) {
+      toast.error("Selecione uma lista de espera.");
+      return;
+    }
+    if (!finalSlotTime) {
+      toast.error("Defina o horário da vaga.");
+      return;
+    }
+
+    const listName = waitlists.find(w => w.id === selectedListId)?.name || "Lista";
+    
+    onSuccess(listName, finalSlotTime);
+    onOpenChange(false);
+    
+    setSelectedListId("");
+    setSelectedSlot("");
+    setManualTime("");
+  };
+
   const uniqueOptions = slots.reduce((acc, slot) => {
     const date = new Date(slot.startTime);
     const valueToSend = format(date, "EEEE, dd 'de' MMMM 'às' HH:mm", { locale: ptBR });
@@ -91,169 +145,156 @@ export function ChatTriggerDialog({ open, onOpenChange, onSuccess }: ChatTrigger
     return acc;
   }, [] as { id: string; value: string; label: string; source: string }[]);
 
-  const getFinalSlotTime = () => mode === 'agenda' ? selectedSlot : manualSlotTime;
-
-  // AÇÃO 1: DISPARO DIRETO (Backend Action)
-  const handleDirectTrigger = async () => {
-    const time = getFinalSlotTime();
-    if (!selectedListId || !time) return;
-    
-    setLoading(true);
-    const formData = new FormData();
-    formData.append('waitlistId', selectedListId);
-    formData.append('slotTime', time);
-
-    const result = await triggerManualSlot(formData);
-    setLoading(false);
-
-    if (result?.success) {
-      const listName = lists.find(l => l.id === selectedListId)?.name || "Lista";
-      onSuccess(listName, time, 'direct');
-      onOpenChange(false);
-      resetForm();
-    } else {
-      toast.error(result?.error || "Erro ao disparar vaga.");
-    }
-  };
-
-  // AÇÃO 2: PEDIR PARA SILVIA (Chat Request)
-  const handleAskSilvia = () => {
-    const time = getFinalSlotTime();
-    if (!selectedListId || !time) return;
-
-    const listName = lists.find(l => l.id === selectedListId)?.name || "Lista";
-    onSuccess(listName, time, 'ai');
-    onOpenChange(false);
-    resetForm();
-  };
-
-  const resetForm = () => {
-    setManualSlotTime("");
-    setSelectedSlot("");
-    setSelectedListId("");
-  };
-
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[450px]">
-        <DialogHeader>
-          <div className="flex items-center gap-2">
-            <div className="p-2 rounded-full bg-amber-100 text-amber-600">
-               <Megaphone className="w-4 h-4" />
-            </div>
-            <DialogTitle>Disparar Vaga</DialogTitle>
-          </div>
-          <DialogDescription>
-            Escolha uma lista e um horário vago para ofertar.
-          </DialogDescription>
-        </DialogHeader>
-
-        <div className="grid gap-5 py-4">
-          
-          {/* 1. SELEÇÃO DE LISTA */}
-          <div className="space-y-2">
-            <Label>Lista de Espera</Label>
-            <Select value={selectedListId} onValueChange={setSelectedListId} disabled={fetchingLists}>
-              <SelectTrigger>
-                <SelectValue placeholder={fetchingLists ? "Carregando..." : "Selecione a lista..."} />
-              </SelectTrigger>
-              <SelectContent>
-                {lists.length === 0 && !fetchingLists ? (
-                  <div className="p-2 text-xs text-muted-foreground text-center">Nenhuma lista disponível.</div>
-                ) : (
-                  lists.map((l) => (
-                    <SelectItem key={l.id} value={l.id}>{l.name}</SelectItem>
-                  ))
-                )}
-              </SelectContent>
-            </Select>
-          </div>
-
-          {/* 2. SELEÇÃO DE HORÁRIO */}
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <Label>Horário da Vaga</Label>
-              <Button 
-                type="button" variant="ghost" size="sm" 
-                className="h-5 text-[10px] text-primary px-1 hover:bg-transparent hover:underline"
-                onClick={() => setMode(mode === 'agenda' ? 'manual' : 'agenda')}
-              >
-                {mode === 'agenda' ? 'Digitar Manualmente' : 'Buscar na Agenda'}
-              </Button>
-            </div>
-
-            {mode === 'agenda' ? (
-              <div className="space-y-2">
-                {/* Navegação de Data */}
-                <div className="flex items-center justify-between bg-muted/30 p-1.5 rounded-md border">
-                    <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setReferenceDate(addDays(referenceDate, -7))}>
-                      <ChevronLeft className="h-3 w-3" />
-                    </Button>
-                    <Popover>
-                      <PopoverTrigger asChild>
-                        <Button variant="ghost" className="h-6 text-xs font-normal w-[140px]">
-                          <CalendarIcon className="mr-2 h-3 w-3" />
-                          {format(referenceDate, "d 'de' MMMM", { locale: ptBR })}
-                        </Button>
-                      </PopoverTrigger>
-                      <PopoverContent className="w-auto p-0" align="center">
-                        <Calendar mode="single" selected={referenceDate} onSelect={(d) => d && setReferenceDate(d)} initialFocus />
-                      </PopoverContent>
-                    </Popover>
-                    <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setReferenceDate(addDays(referenceDate, 7))}>
-                      <ChevronRight className="h-3 w-3" />
-                    </Button>
+      <DialogContent className="sm:max-w-[450px] bg-background/95 backdrop-blur-xl border-border shadow-2xl">
+        <form onSubmit={handleSubmit}>
+          <DialogHeader>
+            <div className="flex items-center gap-3 mb-2">
+                <div className="h-10 w-10 rounded-full bg-amber-500/10 flex items-center justify-center border border-amber-500/20">
+                    <Zap className="h-5 w-5 text-amber-500" />
                 </div>
+                <DialogTitle>
+                    {/* CORREÇÃO AQUI: props 'from' e 'to' removidas, usando className */}
+                    <GradientText size="xl" className="from-amber-500 via-orange-500 to-orange-600">
+                      Disparar Vaga
+                    </GradientText>
+                </DialogTitle>
+            </div>
+            <DialogDescription>
+              A Silvia buscará o primeiro da fila e enviará a oferta.
+            </DialogDescription>
+          </DialogHeader>
 
-                {/* Select de Slots */}
-                <Select value={selectedSlot} onValueChange={setSelectedSlot} disabled={loadingSlots}>
-                  <SelectTrigger className={cn("h-10", !selectedSlot && "text-muted-foreground")}>
-                    <SelectValue placeholder={loadingSlots ? "Buscando..." : (uniqueOptions.length ? "Selecione o horário..." : "Sem horários livres")} />
+          <div className="grid gap-5 py-5">
+            <div className="space-y-2">
+              <Label className="flex items-center gap-2 text-muted-foreground">
+                <List className="w-3.5 h-3.5" /> Qual lista processar?
+              </Label>
+              <Select onValueChange={setSelectedListId} value={selectedListId} disabled={loadingLists}>
+                <SelectTrigger className="h-11 bg-muted/50 border-border focus:ring-amber-500/20">
+                  <SelectValue placeholder={loadingLists ? "Carregando..." : "Selecione a lista de espera..."} />
+                </SelectTrigger>
+                <SelectContent>
+                  {waitlists.length === 0 && !loadingLists ? (
+                     <div className="p-2 text-xs text-muted-foreground text-center">Nenhuma lista ativa encontrada</div>
+                  ) : (
+                    waitlists.map((list) => (
+                      <SelectItem key={list.id} value={list.id}>
+                        {list.name} <span className="text-muted-foreground ml-1">({list._count?.entries || 0} p.)</span>
+                      </SelectItem>
+                    ))
+                  )}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <Label className="flex items-center gap-2 text-muted-foreground">
+                   <CalendarIcon className="w-3.5 h-3.5" /> Qual horário vagou?
+                </Label>
+                <Button 
+                  type="button" 
+                  variant="ghost" 
+                  size="sm" 
+                  className="h-6 text-[10px] text-amber-600 hover:text-amber-500 px-2"
+                  onClick={() => setMode(mode === 'agenda' ? 'manual' : 'agenda')}
+                >
+                  {mode === 'agenda' ? (
+                    <span className="flex items-center gap-1"><Keyboard className="w-3 h-3"/> Digitar Manual</span>
+                  ) : (
+                    <span className="flex items-center gap-1"><CalendarIcon className="w-3 h-3"/> Usar Agenda</span>
+                  )}
+                </Button>
+              </div>
+
+              {mode === 'agenda' && (
+                <div className="flex items-center justify-between bg-muted/40 p-1.5 rounded-lg border border-border/50 mb-2">
+                  <Button type="button" variant="ghost" size="icon" className="h-7 w-7" onClick={() => setReferenceDate(addDays(referenceDate, -7))}>
+                    <ChevronLeft className="h-3 w-3" />
+                  </Button>
+                  
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <Button variant={"ghost"} className="h-7 text-xs font-medium w-[140px]">
+                        {format(referenceDate, "d 'de' MMMM", { locale: ptBR })}
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-auto p-0" align="center">
+                      <Calendar
+                        mode="single"
+                        selected={referenceDate}
+                        onSelect={(d) => d && setReferenceDate(d)}
+                        initialFocus
+                      />
+                    </PopoverContent>
+                  </Popover>
+
+                  <Button type="button" variant="ghost" size="icon" className="h-7 w-7" onClick={() => setReferenceDate(addDays(referenceDate, 7))}>
+                    <ChevronRight className="h-3 w-3" />
+                  </Button>
+                </div>
+              )}
+
+              {loadingSlots ? (
+                 <div className="h-11 w-full rounded-md bg-muted/50 border border-border animate-pulse flex items-center justify-center text-xs text-muted-foreground gap-2">
+                    <Loader2 className="h-3 w-3 animate-spin"/> Buscando horários...
+                 </div>
+              ) : mode === 'agenda' ? (
+                <Select onValueChange={setSelectedSlot} value={selectedSlot}>
+                  <SelectTrigger className="h-11 bg-muted/50 border-border focus:ring-amber-500/20">
+                    <SelectValue placeholder={uniqueOptions.length > 0 ? "Selecione um horário livre..." : "Sem horários livres esta semana"} />
                   </SelectTrigger>
                   <SelectContent>
-                    {uniqueOptions.map((opt) => (
+                      {uniqueOptions.map((opt) => (
                         <SelectItem key={opt.id} value={opt.value}>
-                          <span className="capitalize">{opt.label}</span>
+                          <div className="flex items-center gap-2">
+                            <span className={cn("w-2 h-2 rounded-full", opt.source === 'CLINIC' ? "bg-blue-500" : "bg-amber-500")}/>
+                            <span className="capitalize">{opt.label}</span>
+                          </div>
                         </SelectItem>
-                    ))}
+                      ))}
                   </SelectContent>
                 </Select>
-              </div>
-            ) : (
-              <Input 
-                placeholder="Ex: Amanhã às 15:30" 
-                value={manualSlotTime}
-                onChange={(e) => setManualSlotTime(e.target.value)}
-              />
-            )}
+              ) : (
+                <div className="relative group">
+                  <Input
+                    value={manualTime}
+                    onChange={(e) => setManualTime(e.target.value)}
+                    placeholder="Ex: Amanhã às 14:30"
+                    className="h-11 bg-muted/50 border-border focus:ring-amber-500/20 pl-4"
+                    autoFocus
+                  />
+                </div>
+              )}
+            </div>
+            
+            <div className="bg-amber-500/10 border border-amber-500/20 rounded-lg p-3 flex gap-3">
+               <Sparkles className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+               <p className="text-xs text-amber-900 dark:text-amber-100 leading-relaxed">
+                 Ao confirmar, a <strong>Silvia</strong> irá assumir o controle. Ela notificará o paciente e aguardará a resposta no WhatsApp.
+               </p>
+            </div>
+
           </div>
-        </div>
 
-        <DialogFooter className="gap-2 sm:gap-0">
-          <Button variant="outline" onClick={() => onOpenChange(false)}>Cancelar</Button>
-          
-          {/* Botão AI Agent */}
-          <Button 
-            variant="secondary" 
-            onClick={handleAskSilvia}
-            disabled={loading || !selectedListId || (mode === 'agenda' ? !selectedSlot : !manualSlotTime)}
-            className="gap-2"
-            title="Preenche o chat para você revisar antes de enviar"
-          >
-            <Sparkles className="w-4 h-4 text-purple-500" />
-            Pedir para Silvia
-          </Button>
-
-          {/* Botão Direct Action */}
-          <Button 
-            onClick={handleDirectTrigger} 
-            disabled={loading || !selectedListId || (mode === 'agenda' ? !selectedSlot : !manualSlotTime)}
-            className="bg-amber-600 hover:bg-amber-700 text-white gap-2"
-          >
-            {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Zap className="w-4 h-4" />}
-            Disparar Agora
-          </Button>
-        </DialogFooter>
+          <DialogFooter>
+            <Button 
+                type="submit" 
+                disabled={loading || !selectedListId || (mode === 'agenda' && !selectedSlot) || (mode === 'manual' && !manualTime)}
+                className="w-full bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-600 hover:to-orange-700 text-white font-semibold h-11 shadow-lg shadow-amber-500/20 border-0"
+            >
+              {loading ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <span className="flex items-center gap-2">
+                    Pedir para Silvia Disparar <Sparkles className="h-4 w-4" />
+                </span>
+              )}
+            </Button>
+          </DialogFooter>
+        </form>
       </DialogContent>
     </Dialog>
   );

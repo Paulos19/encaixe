@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { Send, Menu, Plus, Sparkles, Eraser, ChevronDown, Bot, FileSpreadsheet, Loader2, Zap } from 'lucide-react';
+import { Send, Menu, Plus, Sparkles, Eraser, ChevronDown, Bot, FileSpreadsheet, Loader2, Zap, Paperclip } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Sheet, SheetContent, SheetTrigger, SheetTitle } from "@/components/ui/sheet";
@@ -69,7 +69,7 @@ export function ChatWindow({
   const handleSubmit = async (e?: React.FormEvent, customMessage?: string, hiddenPrompt?: string) => {
     e?.preventDefault();
     const textToSend = customMessage || input;
-    const apiMessage = hiddenPrompt || textToSend;
+    const apiMessage = hiddenPrompt || textToSend; // O que vai pra IA de verdade
 
     if (!textToSend.trim() && !hiddenPrompt) return;
     if (isLoading) return;
@@ -86,8 +86,8 @@ export function ChatWindow({
     }
 
     const tempUserMsg: ChatMessage = { role: 'user', content: textToSend, timestamp: Date.now() };
-    // Só adiciona visualmente se não for um prompt oculto puro (sem mensagem de display)
-    // Se tiver userDisplayMessage (customMessage), adiciona ele.
+    
+    // Adiciona ao chat visual (se houver mensagem de exibição)
     setMessages(prev => [...prev, tempUserMsg]);
     setIsLoading(true);
 
@@ -183,29 +183,14 @@ Instrução: Confirme o recebimento e pergunte se desejo iniciar uma lista de es
     reader.readAsBinaryString(file);
   };
 
-  // --- LÓGICA DE CALLBACK DO DISPARO (ATUALIZADA) ---
-  const handleTriggerSuccess = async (listName: string, slotTime: string, mode: 'direct' | 'ai') => {
-    
-    if (mode === 'direct') {
-      // MODO 1: Ação já executada via backend, apenas avisa a IA para manter o contexto
-      const userDisplayMessage = `⚡ Disparar vaga na lista "${listName}" para ${slotTime}`;
-      const systemPrompt = `[AÇÃO DE SISTEMA: DISPARO DE VAGA REALIZADO]
-O usuário executou um disparo manual via interface.
-Lista: ${listName}
-Horário: ${slotTime}
-Instrução: Confirme que o processo iniciou e que avisará assim que houver resposta.`;
-
-      await handleSubmit(undefined, userDisplayMessage, systemPrompt);
-    
-    } else {
-      // MODO 2: Pedido Natural para a IA executar (Agentic Handoff)
-      // Aqui simulamos o usuário pedindo para a IA fazer a ação
-      const naturalRequest = `Silvia, por favor dispare uma vaga na lista "${listName}" para ${slotTime}.`;
+  // --- LÓGICA DE DISPARO DA SILVIA ---
+  // Quando o usuário configura o modal e clica "Pedir para Silvia"
+  const handleTriggerSuccess = async (listName: string, slotTime: string) => {
+      // Cria a frase mágica que a IA vai entender
+      const naturalRequest = `Silvia, dispare a lista "${listName}" ofertando uma vaga para ${slotTime}.`;
       
-      // Preenche o input visualmente (opcional) ou envia direto
-      // Enviar direto cria uma experiência mais fluida
+      // Envia para o chat como se o usuário tivesse digitado
       await handleSubmit(undefined, naturalRequest);
-    }
   };
 
   return (
@@ -213,7 +198,7 @@ Instrução: Confirme que o processo iniciou e que avisará assim que houver res
       
       <input type="file" ref={fileInputRef} onChange={handleFileUpload} accept=".xlsx, .xls, .csv" className="hidden" />
       
-      {/* DIALOG DE DISPARO (Inteligente) */}
+      {/* DIALOG DE DISPARO (Integrado) */}
       <ChatTriggerDialog 
         open={isTriggerOpen} 
         onOpenChange={setIsTriggerOpen} 
@@ -221,7 +206,7 @@ Instrução: Confirme que o processo iniciou e que avisará assim que houver res
       />
 
       {/* --- HEADER --- */}
-      <header className="flex-none flex items-center justify-between px-4 py-3 border-b border-border/40 bg-background/80 backdrop-blur-md z-10">
+      <header className="flex-none flex items-center justify-between px-4 py-3 border-b border-border/40 bg-background/80 backdrop-blur-md z-10 sticky top-0">
         <div className="flex items-center gap-2">
           {/* Mobile Menu */}
           <div className="md:hidden">
@@ -377,7 +362,7 @@ Instrução: Confirme que o processo iniciou e que avisará assim que houver res
                   className="gap-3 cursor-pointer"
                   onClick={() => fileInputRef.current?.click()}
                 >
-                  <div className="h-8 w-8 rounded-lg bg-green-100 text-green-700 flex items-center justify-center border border-green-200">
+                  <div className="h-8 w-8 rounded-lg bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 flex items-center justify-center border border-green-200 dark:border-green-800">
                     <FileSpreadsheet className="w-4 h-4" />
                   </div>
                   <div className="flex flex-col">
@@ -390,7 +375,7 @@ Instrução: Confirme que o processo iniciou e que avisará assim que houver res
                   className="gap-3 cursor-pointer"
                   onClick={() => setIsTriggerOpen(true)}
                 >
-                  <div className="h-8 w-8 rounded-lg bg-amber-100 text-amber-700 flex items-center justify-center border border-amber-200">
+                  <div className="h-8 w-8 rounded-lg bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 flex items-center justify-center border border-amber-200 dark:border-amber-800">
                     <Zap className="w-4 h-4" />
                   </div>
                   <div className="flex flex-col">
