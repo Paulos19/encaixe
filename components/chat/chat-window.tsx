@@ -11,7 +11,7 @@ import { ChatSidebar } from "@/components/chat/chat-sidebar";
 import { ChatMessageBubble } from '@/components/chat/chat-message-bubble';
 import { sendMessageToSilvia, ChatMessage } from '@/app/actions/silvia';
 import { importPatientsBulk } from '@/app/actions/patient';
-import { ChatTriggerDialog } from '@/components/chat/chat-trigger-dialog'; // [NOVO]
+import { ChatTriggerDialog } from '@/components/chat/chat-trigger-dialog';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -21,7 +21,6 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-  DropdownMenuSeparator
 } from "@/components/ui/dropdown-menu";
 import * as XLSX from 'xlsx';
 
@@ -45,7 +44,7 @@ export function ChatWindow({
   const [isLoading, setIsLoading] = useState(false);
   const [sessionId, setSessionId] = useState<string | undefined>(initialSessionId);
   const [isUploading, setIsUploading] = useState(false);
-  const [isTriggerOpen, setIsTriggerOpen] = useState(false); // [NOVO] Estado do dialog
+  const [isTriggerOpen, setIsTriggerOpen] = useState(false);
   
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -87,6 +86,8 @@ export function ChatWindow({
     }
 
     const tempUserMsg: ChatMessage = { role: 'user', content: textToSend, timestamp: Date.now() };
+    // Só adiciona visualmente se não for um prompt oculto puro (sem mensagem de display)
+    // Se tiver userDisplayMessage (customMessage), adiciona ele.
     setMessages(prev => [...prev, tempUserMsg]);
     setIsLoading(true);
 
@@ -182,16 +183,29 @@ Instrução: Confirme o recebimento e pergunte se desejo iniciar uma lista de es
     reader.readAsBinaryString(file);
   };
 
-  // --- LÓGICA DE CALLBACK DO DISPARO ---
-  const handleTriggerSuccess = async (listName: string, slotTime: string) => {
-    const userDisplayMessage = `⚡ Disparar vaga na lista "${listName}" para ${slotTime}`;
-    const systemPrompt = `[AÇÃO DE SISTEMA: DISPARO DE VAGA REALIZADO]
-O usuário acabou de usar a ferramenta de disparo manual com sucesso.
+  // --- LÓGICA DE CALLBACK DO DISPARO (ATUALIZADA) ---
+  const handleTriggerSuccess = async (listName: string, slotTime: string, mode: 'direct' | 'ai') => {
+    
+    if (mode === 'direct') {
+      // MODO 1: Ação já executada via backend, apenas avisa a IA para manter o contexto
+      const userDisplayMessage = `⚡ Disparar vaga na lista "${listName}" para ${slotTime}`;
+      const systemPrompt = `[AÇÃO DE SISTEMA: DISPARO DE VAGA REALIZADO]
+O usuário executou um disparo manual via interface.
 Lista: ${listName}
-Horário Ofertado: ${slotTime}
-Instrução: Aja como uma assistente eficiente. Informe que o primeiro paciente da fila já foi notificado e que avisarei assim que ele responder.`;
+Horário: ${slotTime}
+Instrução: Confirme que o processo iniciou e que avisará assim que houver resposta.`;
 
-    await handleSubmit(undefined, userDisplayMessage, systemPrompt);
+      await handleSubmit(undefined, userDisplayMessage, systemPrompt);
+    
+    } else {
+      // MODO 2: Pedido Natural para a IA executar (Agentic Handoff)
+      // Aqui simulamos o usuário pedindo para a IA fazer a ação
+      const naturalRequest = `Silvia, por favor dispare uma vaga na lista "${listName}" para ${slotTime}.`;
+      
+      // Preenche o input visualmente (opcional) ou envia direto
+      // Enviar direto cria uma experiência mais fluida
+      await handleSubmit(undefined, naturalRequest);
+    }
   };
 
   return (
@@ -199,7 +213,7 @@ Instrução: Aja como uma assistente eficiente. Informe que o primeiro paciente 
       
       <input type="file" ref={fileInputRef} onChange={handleFileUpload} accept=".xlsx, .xls, .csv" className="hidden" />
       
-      {/* DIALOG DE DISPARO */}
+      {/* DIALOG DE DISPARO (Inteligente) */}
       <ChatTriggerDialog 
         open={isTriggerOpen} 
         onOpenChange={setIsTriggerOpen} 
