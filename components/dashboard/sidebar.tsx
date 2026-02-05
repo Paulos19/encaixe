@@ -41,6 +41,7 @@ const menuItems = [
   { title: "Visão Geral", href: "/dashboard", icon: LayoutDashboard, roles: ["ADMIN", "MANAGER"] },
   { title: "Listas de Espera", href: "/dashboard/waitlists", icon: CalendarDays, roles: ["MANAGER"] },
   { title: "Pacientes", href: "/dashboard/patients", icon: Users, roles: ["MANAGER"] },
+  { title: "Chat", href: "/chat", icon: Headset, roles: ["MANAGER"] },
   { title: "Assinatura", href: "/dashboard/settings/billing", icon: Settings, roles: ["MANAGER"] },
   { title: "Agenda", href: "/dashboard/agenda", icon: CalendarRange, roles: ["MANAGER"] },
   { title: "Gestão de Clientes", href: "/admin/tenants", icon: BarChart3, roles: ["ADMIN"] },
