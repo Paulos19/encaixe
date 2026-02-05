@@ -273,3 +273,67 @@ export async function deletePatient(patientId: string) {
       return { error: "Erro ao excluir paciente." };
     }
   }
+
+  export async function importPatientsBulk(patientsData: any[]) {
+  const session = await auth();
+  if (!session?.user?.email) return { error: "Não autorizado" };
+
+  try {
+    const user = await prisma.user.findUnique({ where: { email: session.user.email } });
+    if (!user) return { error: "Usuário não encontrado" };
+
+    let successCount = 0;
+    let errorCount = 0;
+    const importedNames: string[] = [];
+
+    for (const p of patientsData) {
+      try {
+        const phone = formatPhoneForWhatsapp(p.phone);
+        if (phone.length < 10) { errorCount++; continue; }
+
+        let birthDate = null;
+        if (p.birthDate) {
+            // Tenta criar data, verificando se é número (Excel date) ou string
+            birthDate = !isNaN(Number(p.birthDate)) 
+                ? new Date((p.birthDate - (25567 + 2)) * 86400 * 1000).toISOString() // Conversão Excel serial date
+                : new Date(p.birthDate).toISOString();
+        }
+
+        await prisma.patient.upsert({
+          where: {
+            managerId_phone: {
+              managerId: user.id,
+              phone
+            }
+          },
+          update: {
+            name: p.name,
+            birthDate,
+            insurance: p.insurance,
+            notes: p.notes
+          },
+          create: {
+            managerId: user.id,
+            name: p.name,
+            phone,
+            birthDate,
+            insurance: p.insurance,
+            notes: p.notes
+          }
+        });
+
+        importedNames.push(p.name);
+        successCount++;
+      } catch (e) {
+        errorCount++;
+      }
+    }
+
+    revalidatePath('/dashboard/patients');
+    return { success: true, count: successCount, errors: errorCount, names: importedNames };
+
+  } catch (error) {
+    console.error("Erro importPatientsBulk:", error);
+    return { error: "Erro crítico na importação." };
+  }
+}

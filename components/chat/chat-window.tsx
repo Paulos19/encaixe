@@ -2,24 +2,27 @@
 
 import { useState, useRef, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { Send, Menu, Plus, Sparkles, Eraser, ChevronDown, Bot } from 'lucide-react';
+import { Send, Menu, Plus, Sparkles, Eraser, ChevronDown, Bot, FileSpreadsheet, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
-import { Sheet, SheetContent, SheetTrigger, SheetTitle } from "@/components/ui/sheet"; // Add SheetTitle for a11y
+import { Sheet, SheetContent, SheetTrigger, SheetTitle } from "@/components/ui/sheet";
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { ChatSidebar } from "@/components/chat/chat-sidebar";
 import { ChatMessageBubble } from '@/components/chat/chat-message-bubble';
 import { sendMessageToSilvia, ChatMessage } from '@/app/actions/silvia';
+import { importPatientsBulk } from '@/app/actions/patient'; // [NOVO] Action criada
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { ModeToggle } from '@/components/mode-toggle'; // [NOVO]
+import { ModeToggle } from '@/components/mode-toggle';
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
+  DropdownMenuSeparator
 } from "@/components/ui/dropdown-menu";
+import * as XLSX from 'xlsx'; // [NOVO] Importação do XLSX
 
 interface ChatWindowProps {
   initialMessages?: ChatMessage[];
@@ -40,9 +43,11 @@ export function ChatWindow({
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [sessionId, setSessionId] = useState<string | undefined>(initialSessionId);
+  const [isUploading, setIsUploading] = useState(false); // [NOVO] Estado de upload
   
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null); // [NOVO] Ref para input de arquivo
 
   const currentSession = sessions?.find(s => s.id === sessionId);
   const chatTitle = currentSession?.title || "Nova Conversa";
@@ -54,18 +59,20 @@ export function ChatWindow({
     }
   }, [initialSessionId, initialMessages]);
 
-  // Scroll to bottom effect
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollIntoView({ behavior: 'smooth' });
     }
   }, [messages, isLoading]);
 
-  const handleSubmit = async (e?: React.FormEvent, customMessage?: string) => {
+  const handleSubmit = async (e?: React.FormEvent, customMessage?: string, hiddenPrompt?: string) => {
     e?.preventDefault();
     const textToSend = customMessage || input;
+    // Se houver um hiddenPrompt (usado para injeção de contexto de arquivo), usamos ele para a API, mas mostramos textToSend na UI
+    const apiMessage = hiddenPrompt || textToSend;
 
-    if (!textToSend.trim() || isLoading) return;
+    if (!textToSend.trim() && !hiddenPrompt) return;
+    if (isLoading) return;
 
     if (!customMessage) {
       setInput('');
@@ -78,13 +85,14 @@ export function ChatWindow({
       return;
     }
 
+    // Na UI mostramos o que o usuário "fez" (ex: "Importei planilha")
     const tempUserMsg: ChatMessage = { role: 'user', content: textToSend, timestamp: Date.now() };
-    // Optimistic Update
     setMessages(prev => [...prev, tempUserMsg]);
     setIsLoading(true);
 
     try {
-      const response = await sendMessageToSilvia(messages, textToSend, sessionId);
+      // Enviamos para a Silvia (pode ser o texto normal ou o prompt de sistema injetado)
+      const response = await sendMessageToSilvia(messages, apiMessage, sessionId);
       
       if (response.success && response.messages) {
         setMessages(response.messages);
@@ -97,7 +105,6 @@ export function ChatWindow({
         }
       } else {
         toast.error("Erro", { description: response.error });
-        // Rollback on error
         setMessages(prev => prev.filter(m => m !== tempUserMsg));
         if (!customMessage) setInput(textToSend);
       }
@@ -120,13 +127,85 @@ export function ChatWindow({
     }
   };
 
+  // --- LÓGICA DE UPLOAD DE ARQUIVO ---
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsUploading(true);
+    const reader = new FileReader();
+
+    reader.onload = async (evt) => {
+      try {
+        const bstr = evt.target?.result;
+        const wb = XLSX.read(bstr, { type: 'binary' });
+        const wsname = wb.SheetNames[0];
+        const ws = wb.Sheets[wsname];
+        const jsonData = XLSX.utils.sheet_to_json(ws, { header: 1 });
+
+        // Parser Simples (Mesma lógica do dialog)
+        const headers = (jsonData[0] as string[]).map(h => String(h).toLowerCase());
+        const rows = jsonData.slice(1);
+
+        const formattedData = rows.map((row: any) => ({
+          name: row[headers.indexOf('nome')] || row[0],
+          phone: row[headers.indexOf('telefone')] || row[headers.indexOf('celular')] || row[1],
+          birthDate: row[headers.indexOf('nascimento')] || row[headers.indexOf('data de nascimento')] || row[2],
+          insurance: row[headers.indexOf('convenio')] || row[headers.indexOf('convênio')] || row[3],
+          notes: row[headers.indexOf('obs')] || row[4] || ''
+        })).filter(r => r.name && r.phone);
+
+        if (formattedData.length === 0) {
+          toast.error("Nenhum dado válido encontrado na planilha.");
+          setIsUploading(false);
+          return;
+        }
+
+        // Salvar no Banco
+        const result = await importPatientsBulk(formattedData);
+
+        if (result.success && result.names) {
+          toast.success(`${result.count} pacientes processados.`);
+          
+          // Dispara mensagem para a Silvia com contexto do sistema
+          // A UI mostra "📄 Importar planilha...", mas a Silvia recebe os dados técnicos
+          const userDisplayMessage = `📄 Importar planilha de pacientes (${result.count} registros)`;
+          const systemPrompt = `[AÇÃO DE SISTEMA: IMPORTAÇÃO DE ARQUIVO]
+O usuário acabou de importar uma planilha Excel com ${result.count} pacientes.
+Status: Sucesso.
+Nomes registrados: ${result.names.join(', ')}.
+Instrução: Aja naturalmente. Confirme que você recebeu os dados, informe a quantidade e liste os nomes importados para o usuário conferir.`;
+
+          await handleSubmit(undefined, userDisplayMessage, systemPrompt);
+        } else {
+          toast.error("Erro ao salvar dados da planilha.");
+        }
+      } catch (error) {
+        console.error(error);
+        toast.error("Erro ao processar arquivo.");
+      } finally {
+        setIsUploading(false);
+        // Limpa o input para permitir selecionar o mesmo arquivo novamente
+        if (fileInputRef.current) fileInputRef.current.value = '';
+      }
+    };
+    reader.readAsBinaryString(file);
+  };
+
   return (
-    // FLEX COLUMN & H-FULL são cruciais aqui
     <div className="flex flex-col h-full bg-background relative font-sans transition-colors duration-300">
       
+      {/* Input Oculto para Arquivo */}
+      <input 
+        type="file" 
+        ref={fileInputRef}
+        onChange={handleFileUpload}
+        accept=".xlsx, .xls, .csv"
+        className="hidden"
+      />
+
       {/* --- HEADER --- */}
       <header className="flex-none flex items-center justify-between px-4 py-3 border-b border-border/40 bg-background/80 backdrop-blur-md z-10">
-        
         <div className="flex items-center gap-2">
           {/* Mobile Menu */}
           <div className="md:hidden">
@@ -145,10 +224,7 @@ export function ChatWindow({
 
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button 
-                variant="ghost" 
-                className="h-10 px-3 gap-2 text-foreground/80 hover:bg-muted/50 rounded-xl group transition-all"
-              >
+              <Button variant="ghost" className="h-10 px-3 gap-2 text-foreground/80 hover:bg-muted/50 rounded-xl group transition-all">
                 <span className="font-semibold text-lg tracking-tight">Silvia AI</span>
                 <ChevronDown className="w-4 h-4 text-muted-foreground group-hover:text-primary transition-colors" />
               </Button>
@@ -174,16 +250,12 @@ export function ChatWindow({
           </DropdownMenu>
         </div>
 
-        {/* Desktop Title */}
         <div className="hidden md:flex items-center absolute left-1/2 -translate-x-1/2 opacity-60 pointer-events-none">
            <span className="text-xs font-medium truncate max-w-[200px]">{chatTitle}</span>
         </div>
 
         <div className="flex items-center gap-1">
-           {/* Dark Mode Toggle */}
            <ModeToggle />
-
-           {/* Clear Context */}
            <TooltipProvider>
             <Tooltip>
               <TooltipTrigger asChild>
@@ -191,7 +263,7 @@ export function ChatWindow({
                   variant="ghost" size="icon" 
                   className="h-9 w-9 text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors rounded-full"
                   onClick={() => handleSubmit(undefined, '/limpar')}
-                  disabled={isLoading}
+                  disabled={isLoading || isUploading}
                 >
                   <Eraser className="w-4 h-4" />
                 </Button>
@@ -209,11 +281,9 @@ export function ChatWindow({
         </div>
       </header>
 
-      {/* --- SCROLL AREA (Core Fix) --- */}
-      {/* flex-1: Ocupa o espaço restante | overflow-y-auto: Permite scroll | min-h-0: Fix do flexbox para scroll aninhado */}
+      {/* --- SCROLL AREA --- */}
       <div className="flex-1 overflow-y-auto custom-scrollbar min-h-0 bg-background/50">
         <div className="max-w-3xl mx-auto flex flex-col px-4 pt-6 pb-4 min-h-full">
-          
           {messages.length === 0 ? (
             /* EMPTY STATE */
             <div className="flex-1 flex flex-col items-center justify-center text-center p-8 animate-in fade-in zoom-in duration-500 my-auto">
@@ -224,34 +294,12 @@ export function ChatWindow({
                    <AvatarFallback className="text-2xl font-bold text-primary">SI</AvatarFallback>
                  </Avatar>
               </div>
-              
               <h2 className="text-3xl font-semibold tracking-tight mb-3">
                 Olá, {user?.name?.split(' ')[0] || 'Doutor(a)'}
               </h2>
               <p className="text-muted-foreground text-lg max-w-[420px] mb-10 font-light">
                 Otimize sua clínica hoje.
               </p>
-              
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 w-full max-w-[650px]">
-                {[
-                  { icon: "📅", text: "Minha agenda hoje", desc: "Verificar horários vagos" },
-                  { icon: "👤", text: "Buscar paciente", desc: "Encontrar ficha completa" },
-                  { icon: "📝", text: "Criar paciente", desc: "Cadastrar novo perfil" },
-                  { icon: "📊", text: "Resumo financeiro", desc: "Ver faturamento do mês" }
-                ].map((s, idx) => (
-                  <button 
-                    key={idx}
-                    onClick={() => setInput(s.text)}
-                    className="flex items-start gap-4 p-4 text-left bg-card border border-border/50 hover:border-primary/20 hover:bg-muted/50 rounded-2xl transition-all group"
-                  >
-                    <span className="text-2xl group-hover:scale-110 transition-transform">{s.icon}</span>
-                    <div className="flex flex-col">
-                      <span className="text-sm font-medium text-foreground group-hover:text-primary transition-colors">{s.text}</span>
-                      <span className="text-xs text-muted-foreground/80">{s.desc}</span>
-                    </div>
-                  </button>
-                ))}
-              </div>
             </div>
           ) : (
             /* MESSAGES LIST */
@@ -260,7 +308,7 @@ export function ChatWindow({
                 <ChatMessageBubble key={idx} {...msg} />
               ))}
               
-              {isLoading && (
+              {(isLoading || isUploading) && (
                 <div className="flex w-full justify-start mb-6 animate-pulse">
                    <div className="flex items-center gap-4">
                       <div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center">
@@ -274,14 +322,13 @@ export function ChatWindow({
                    </div>
                 </div>
               )}
-              {/* Âncora invisível para scroll */}
               <div ref={scrollRef} className="h-1" />
             </div>
           )}
         </div>
       </div>
 
-      {/* --- INPUT AREA (Fixed Footer) --- */}
+      {/* --- INPUT AREA --- */}
       <div className="flex-none p-4 pb-6 bg-background z-10">
         <div className="max-w-3xl mx-auto relative">
           
@@ -292,9 +339,37 @@ export function ChatWindow({
               "bg-muted/30 focus-within:bg-background focus-within:ring-2 ring-primary/20 ring-offset-2 ring-offset-background"
             )}
           >
-            <Button type="button" variant="ghost" size="icon" className="rounded-full h-10 w-10 text-muted-foreground hover:text-foreground mb-1 ml-1 shrink-0">
-               <Plus className="w-5 h-5" />
-            </Button>
+            {/* MENU DE ANEXOS (SUBSTITUI O BOTÃO PLUS SIMPLES) */}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button 
+                  type="button" 
+                  variant="ghost" 
+                  size="icon" 
+                  className="rounded-full h-10 w-10 text-muted-foreground hover:text-foreground mb-1 ml-1 shrink-0"
+                  disabled={isLoading || isUploading}
+                >
+                  {isUploading ? <Loader2 className="w-5 h-5 animate-spin text-primary" /> : <Plus className="w-5 h-5" />}
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="w-56 mb-2">
+                <div className="px-2 py-1.5 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                  Adicionar ao contexto
+                </div>
+                <DropdownMenuItem 
+                  className="gap-3 cursor-pointer"
+                  onClick={() => fileInputRef.current?.click()}
+                >
+                  <div className="h-8 w-8 rounded-lg bg-green-100 text-green-700 flex items-center justify-center border border-green-200">
+                    <FileSpreadsheet className="w-4 h-4" />
+                  </div>
+                  <div className="flex flex-col">
+                    <span className="font-medium">Importar Planilha</span>
+                    <span className="text-[10px] text-muted-foreground">Pacientes (.xlsx, .csv)</span>
+                  </div>
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
 
             <Textarea 
               ref={textareaRef}
@@ -305,14 +380,15 @@ export function ChatWindow({
                 e.target.style.height = `${Math.min(e.target.scrollHeight, 200)}px`;
               }}
               onKeyDown={handleKeyDown}
-              placeholder="Pergunte a Silvia..."
+              placeholder={isUploading ? "Processando arquivo..." : "Pergunte a Silvia..."}
               className="flex-1 min-h-[44px] max-h-[200px] w-full resize-none border-0 bg-transparent focus-visible:ring-0 px-3 py-3 custom-scrollbar text-base placeholder:text-muted-foreground/50"
               rows={1}
+              disabled={isUploading}
             />
             
             <Button 
               type="submit" 
-              disabled={!input.trim() || isLoading}
+              disabled={!input.trim() || isLoading || isUploading}
               size="icon"
               className={cn(
                 "mb-1 mr-1 h-10 w-10 rounded-full transition-all duration-300 shadow-sm shrink-0",
