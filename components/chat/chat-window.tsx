@@ -2,10 +2,10 @@
 
 import { useState, useRef, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { Send, Menu, Plus, Sparkles, Paperclip, Eraser, ChevronDown, Bot } from 'lucide-react';
+import { Send, Menu, Plus, Sparkles, Eraser, ChevronDown, Bot } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
-import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
+import { Sheet, SheetContent, SheetTrigger, SheetTitle } from "@/components/ui/sheet"; // Add SheetTitle for a11y
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { ChatSidebar } from "@/components/chat/chat-sidebar";
 import { ChatMessageBubble } from '@/components/chat/chat-message-bubble';
@@ -13,6 +13,7 @@ import { sendMessageToSilvia, ChatMessage } from '@/app/actions/silvia';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { ModeToggle } from '@/components/mode-toggle'; // [NOVO]
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -43,7 +44,6 @@ export function ChatWindow({
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  // Tenta encontrar o título da sessão atual
   const currentSession = sessions?.find(s => s.id === sessionId);
   const chatTitle = currentSession?.title || "Nova Conversa";
 
@@ -54,6 +54,7 @@ export function ChatWindow({
     }
   }, [initialSessionId, initialMessages]);
 
+  // Scroll to bottom effect
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollIntoView({ behavior: 'smooth' });
@@ -78,9 +79,8 @@ export function ChatWindow({
     }
 
     const tempUserMsg: ChatMessage = { role: 'user', content: textToSend, timestamp: Date.now() };
-    const optimisticHistory = [...messages, tempUserMsg];
-    
-    setMessages(optimisticHistory);
+    // Optimistic Update
+    setMessages(prev => [...prev, tempUserMsg]);
     setIsLoading(true);
 
     try {
@@ -97,6 +97,7 @@ export function ChatWindow({
         }
       } else {
         toast.error("Erro", { description: response.error });
+        // Rollback on error
         setMessages(prev => prev.filter(m => m !== tempUserMsg));
         if (!customMessage) setInput(textToSend);
       }
@@ -120,13 +121,14 @@ export function ChatWindow({
   };
 
   return (
-    <div className="flex flex-col h-full bg-background dark:bg-[#09090b] relative font-sans transition-colors duration-300">
+    // FLEX COLUMN & H-FULL são cruciais aqui
+    <div className="flex flex-col h-full bg-background relative font-sans transition-colors duration-300">
       
-      {/* --- HEADER GEMINI STYLE --- */}
-      <header className="flex items-center justify-between px-4 py-3 sticky top-0 z-20 bg-background/80 dark:bg-[#09090b]/80 backdrop-blur-xl border-b border-border/20">
+      {/* --- HEADER --- */}
+      <header className="flex-none flex items-center justify-between px-4 py-3 border-b border-border/40 bg-background/80 backdrop-blur-md z-10">
         
         <div className="flex items-center gap-2">
-          {/* Mobile Menu Trigger */}
+          {/* Mobile Menu */}
           <div className="md:hidden">
             <Sheet>
               <SheetTrigger asChild>
@@ -135,19 +137,19 @@ export function ChatWindow({
                 </Button>
               </SheetTrigger>
               <SheetContent side="left" className="p-0 w-[280px]">
+                <SheetTitle className="sr-only">Menu de Conversas</SheetTitle>
                 <ChatSidebar user={user} sessions={sessions} />
               </SheetContent>
             </Sheet>
           </div>
 
-          {/* Model Selector (Estilo Gemini) */}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button 
                 variant="ghost" 
                 className="h-10 px-3 gap-2 text-foreground/80 hover:bg-muted/50 rounded-xl group transition-all"
               >
-                <span className="font-semibold text-lg tracking-tight group-hover:text-primary transition-colors">Silvia AI 1.5</span>
+                <span className="font-semibold text-lg tracking-tight">Silvia AI</span>
                 <ChevronDown className="w-4 h-4 text-muted-foreground group-hover:text-primary transition-colors" />
               </Button>
             </DropdownMenuTrigger>
@@ -166,20 +168,22 @@ export function ChatWindow({
                   <Bot className="w-4 h-4" />
                   <div className="flex flex-col opacity-50">
                     <span className="font-medium">Silvia Flash (Em breve)</span>
-                    <span className="text-[10px] text-muted-foreground">Mais rápida e leve</span>
                   </div>
                </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
 
-        {/* Título Centralizado (Opcional, ou ações à direita) */}
+        {/* Desktop Title */}
         <div className="hidden md:flex items-center absolute left-1/2 -translate-x-1/2 opacity-60 pointer-events-none">
            <span className="text-xs font-medium truncate max-w-[200px]">{chatTitle}</span>
         </div>
 
         <div className="flex items-center gap-1">
-           {/* Botão Limpar Memória */}
+           {/* Dark Mode Toggle */}
+           <ModeToggle />
+
+           {/* Clear Context */}
            <TooltipProvider>
             <Tooltip>
               <TooltipTrigger asChild>
@@ -205,14 +209,15 @@ export function ChatWindow({
         </div>
       </header>
 
-      {/* --- CHAT AREA --- */}
-      <div className="flex-1 overflow-y-auto custom-scrollbar px-4">
-        <div className="max-w-3xl mx-auto h-full flex flex-col pt-6 pb-4">
+      {/* --- SCROLL AREA (Core Fix) --- */}
+      {/* flex-1: Ocupa o espaço restante | overflow-y-auto: Permite scroll | min-h-0: Fix do flexbox para scroll aninhado */}
+      <div className="flex-1 overflow-y-auto custom-scrollbar min-h-0 bg-background/50">
+        <div className="max-w-3xl mx-auto flex flex-col px-4 pt-6 pb-4 min-h-full">
           
           {messages.length === 0 ? (
-            /* EMPTY STATE PREMIUM */
-            <div className="flex-1 flex flex-col items-center justify-center text-center p-8 animate-in fade-in zoom-in duration-500">
-              <div className="bg-background dark:bg-muted/20 p-6 rounded-[2rem] shadow-xl dark:shadow-none mb-8 relative group">
+            /* EMPTY STATE */
+            <div className="flex-1 flex flex-col items-center justify-center text-center p-8 animate-in fade-in zoom-in duration-500 my-auto">
+              <div className="bg-muted/30 p-6 rounded-[2rem] mb-8 relative group">
                  <div className="absolute inset-0 bg-primary/20 blur-3xl rounded-full opacity-0 group-hover:opacity-50 transition-opacity duration-1000" />
                  <Avatar className="h-20 w-20 relative z-10">
                    <AvatarImage src="/silvia-avatar.png" className="object-cover object-top scale-110" />
@@ -220,11 +225,11 @@ export function ChatWindow({
                  </Avatar>
               </div>
               
-              <h2 className="text-3xl font-semibold tracking-tight mb-3 bg-gradient-to-r from-foreground to-foreground/60 bg-clip-text text-transparent">
+              <h2 className="text-3xl font-semibold tracking-tight mb-3">
                 Olá, {user?.name?.split(' ')[0] || 'Doutor(a)'}
               </h2>
-              <p className="text-muted-foreground text-lg max-w-[420px] mb-10 leading-relaxed font-light">
-                Como posso ajudar a otimizar sua clínica hoje?
+              <p className="text-muted-foreground text-lg max-w-[420px] mb-10 font-light">
+                Otimize sua clínica hoje.
               </p>
               
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 w-full max-w-[650px]">
@@ -237,7 +242,7 @@ export function ChatWindow({
                   <button 
                     key={idx}
                     onClick={() => setInput(s.text)}
-                    className="flex items-start gap-4 p-4 text-left bg-muted/30 dark:bg-muted/10 border border-transparent hover:border-primary/20 hover:bg-muted/50 rounded-2xl transition-all group"
+                    className="flex items-start gap-4 p-4 text-left bg-card border border-border/50 hover:border-primary/20 hover:bg-muted/50 rounded-2xl transition-all group"
                   >
                     <span className="text-2xl group-hover:scale-110 transition-transform">{s.icon}</span>
                     <div className="flex flex-col">
@@ -250,13 +255,13 @@ export function ChatWindow({
             </div>
           ) : (
             /* MESSAGES LIST */
-            <div className="flex flex-col justify-end min-h-0">
+            <div className="flex flex-col justify-end min-h-0 w-full">
               {messages.map((msg, idx) => (
                 <ChatMessageBubble key={idx} {...msg} />
               ))}
               
               {isLoading && (
-                <div className="flex w-full justify-start mb-6 animate-pulse px-4">
+                <div className="flex w-full justify-start mb-6 animate-pulse">
                    <div className="flex items-center gap-4">
                       <div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center">
                         <Sparkles className="h-4 w-4 text-primary" />
@@ -269,24 +274,25 @@ export function ChatWindow({
                    </div>
                 </div>
               )}
-              <div ref={scrollRef} className="h-4" />
+              {/* Âncora invisível para scroll */}
+              <div ref={scrollRef} className="h-1" />
             </div>
           )}
         </div>
       </div>
 
-      {/* --- FLOATING INPUT AREA --- */}
-      <div className="p-4 pb-6 bg-transparent">
+      {/* --- INPUT AREA (Fixed Footer) --- */}
+      <div className="flex-none p-4 pb-6 bg-background z-10">
         <div className="max-w-3xl mx-auto relative">
           
           <form 
             onSubmit={(e) => handleSubmit(e)}
             className={cn(
-              "relative flex items-end w-full p-2 rounded-[28px] border border-border/50 transition-all shadow-xl shadow-black/5 dark:shadow-black/20",
-              "bg-background/80 dark:bg-[#18181b]/90 backdrop-blur-xl focus-within:ring-2 ring-primary/20 ring-offset-2 ring-offset-background"
+              "relative flex items-end w-full p-2 rounded-[28px] border border-border/50 transition-all shadow-lg",
+              "bg-muted/30 focus-within:bg-background focus-within:ring-2 ring-primary/20 ring-offset-2 ring-offset-background"
             )}
           >
-            <Button type="button" variant="ghost" size="icon" className="rounded-full h-10 w-10 text-muted-foreground hover:text-foreground mb-1 ml-1">
+            <Button type="button" variant="ghost" size="icon" className="rounded-full h-10 w-10 text-muted-foreground hover:text-foreground mb-1 ml-1 shrink-0">
                <Plus className="w-5 h-5" />
             </Button>
 
@@ -299,7 +305,7 @@ export function ChatWindow({
                 e.target.style.height = `${Math.min(e.target.scrollHeight, 200)}px`;
               }}
               onKeyDown={handleKeyDown}
-              placeholder="Pergunte qualquer coisa a Silvia..."
+              placeholder="Pergunte a Silvia..."
               className="flex-1 min-h-[44px] max-h-[200px] w-full resize-none border-0 bg-transparent focus-visible:ring-0 px-3 py-3 custom-scrollbar text-base placeholder:text-muted-foreground/50"
               rows={1}
             />
@@ -309,7 +315,7 @@ export function ChatWindow({
               disabled={!input.trim() || isLoading}
               size="icon"
               className={cn(
-                "mb-1 mr-1 h-10 w-10 rounded-full transition-all duration-300 shadow-sm",
+                "mb-1 mr-1 h-10 w-10 rounded-full transition-all duration-300 shadow-sm shrink-0",
                 input.trim() 
                   ? "bg-primary text-primary-foreground scale-100" 
                   : "bg-muted text-muted-foreground scale-90 opacity-0 pointer-events-none"

@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
 import { Toaster } from "@/components/ui/sonner"; 
-// Importe outros providers globais aqui se necessário (ex: SessionProvider)
+import { ThemeProvider } from "@/components/theme-provider"; // [NOVO]
 
 const inter = Inter({ subsets: ["latin"] });
 
@@ -20,10 +20,18 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="pt-BR" className="scroll-smooth">
-      <body className={inter.className}>
-        {children}
-        <Toaster />
+    // suppressHydrationWarning é OBRIGATÓRIO ao usar next-themes
+    <html lang="pt-BR" className="scroll-smooth" suppressHydrationWarning>
+      <body className={`${inter.className} antialiased`}>
+        <ThemeProvider
+          attribute="class"
+          defaultTheme="system"
+          enableSystem
+          disableTransitionOnChange
+        >
+          {children}
+          <Toaster />
+        </ThemeProvider>
       </body>
     </html>
   );
