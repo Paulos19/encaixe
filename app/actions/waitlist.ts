@@ -136,7 +136,7 @@ export async function findAndNotifyNextPatient(waitlistId: string, slotTime: str
     }
 
     // 3. Prepara o envio para o n8n
-    const webhookUrl = "https://n8n-n8n.yyuhkk.easypanel.host/webhook/disparo-encaixe";
+    const webhookUrl = process.env.N8N_WEBHOOK_URL!
     const formattedPhone = formatPhoneForWhatsapp(nextEntry.patient.phone);
 
     // Dispara o Webhook
