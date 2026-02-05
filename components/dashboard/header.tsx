@@ -5,8 +5,9 @@ import { useSidebar } from "@/components/ui/sidebar-context";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { signOut } from "next-auth/react"; // <--- Importante para logout
-import { globalSearch } from "@/app/actions/search"; // <--- Importante para busca
+import { signOut } from "next-auth/react"; 
+import { globalSearch } from "@/app/actions/search";
+import { ModeToggle } from "@/components/mode-toggle"; // [NOVO] Importação do Toggle
 
 import { 
   DropdownMenu, 
@@ -26,16 +27,13 @@ import {
   Menu, 
   Bell, 
   Sun, 
-  CloudRain, 
   Cloud, 
-  Snowflake,
   Clock,
   Search,
   LogOut,
   Settings,
   User as UserIcon,
   ChevronDown,
-  AlertCircle,
   Loader2,
   Users,
   Calendar
@@ -105,7 +103,7 @@ function WeatherWidget() {
   if (loading || !weather) return null;
 
   return (
-    <div className="hidden items-center gap-2 rounded-full border border-zinc-200 bg-white/50 px-3 py-1.5 text-xs font-medium text-zinc-600 backdrop-blur-sm dark:border-zinc-800 dark:bg-zinc-900/50 dark:text-zinc-300 md:flex transition-all hover:bg-white">
+    <div className="hidden items-center gap-2 rounded-full border border-zinc-200 bg-white/50 px-3 py-1.5 text-xs font-medium text-zinc-600 backdrop-blur-sm dark:border-zinc-800 dark:bg-zinc-900/50 dark:text-zinc-300 md:flex transition-all hover:bg-white dark:hover:bg-zinc-800">
       {getWeatherIcon(weather.code)}
       <span>{Math.round(weather.temp)}°C</span>
     </div>
@@ -121,7 +119,6 @@ function SearchBar() {
   const wrapperRef = useRef<HTMLDivElement>(null);
   const router = useRouter();
 
-  // Debounce da busca
   useEffect(() => {
     const timer = setTimeout(async () => {
       if (query.length >= 2) {
@@ -132,12 +129,11 @@ function SearchBar() {
       } else {
         setResults({ patients: [], waitlists: [] });
       }
-    }, 500); // 500ms de delay
+    }, 500);
 
     return () => clearTimeout(timer);
   }, [query]);
 
-  // Fecha ao clicar fora
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
       if (wrapperRef.current && !wrapperRef.current.contains(event.target as Node)) {
@@ -172,16 +168,15 @@ function SearchBar() {
         placeholder="Buscar pacientes ou listas..." 
       />
       
-      {/* Resultados da Pesquisa */}
       <AnimatePresence>
         {active && query.length >= 2 && (
           <motion.div
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: 10 }}
-            className="absolute top-full mt-2 w-full rounded-xl border border-zinc-200 bg-white p-2 shadow-xl z-50 overflow-hidden"
+            className="absolute top-full mt-2 w-full rounded-xl border border-zinc-200 bg-white dark:bg-zinc-900 dark:border-zinc-800 p-2 shadow-xl z-50 overflow-hidden"
           >
-             <p className="px-2 py-1.5 text-xs font-semibold text-zinc-500 uppercase tracking-wider bg-zinc-50/50 rounded-lg mb-1">
+             <p className="px-2 py-1.5 text-xs font-semibold text-zinc-500 uppercase tracking-wider bg-zinc-50/50 dark:bg-zinc-800/50 rounded-lg mb-1">
                Resultados
              </p>
              
@@ -192,37 +187,35 @@ function SearchBar() {
              )}
 
              <div className="max-h-[300px] overflow-y-auto space-y-1 scrollbar-hide">
-                {/* Pacientes */}
                 {results.patients.map((p) => (
                   <div 
                     key={p.id}
                     onClick={() => handleSelect('/dashboard/patients')} 
-                    className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm hover:bg-zinc-100 cursor-pointer text-zinc-700 transition-colors"
+                    className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800 cursor-pointer text-zinc-700 dark:text-zinc-300 transition-colors"
                   >
-                     <div className="h-8 w-8 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 shrink-0">
-                        <Users className="h-4 w-4" />
-                     </div>
-                     <div className="flex flex-col overflow-hidden">
-                        <span className="font-medium truncate">{p.name}</span>
-                        <span className="text-xs text-zinc-400">{p.phone}</span>
-                     </div>
+                      <div className="h-8 w-8 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-blue-600 dark:text-blue-400 shrink-0">
+                         <Users className="h-4 w-4" />
+                      </div>
+                      <div className="flex flex-col overflow-hidden">
+                         <span className="font-medium truncate">{p.name}</span>
+                         <span className="text-xs text-zinc-400">{p.phone}</span>
+                      </div>
                   </div>
                 ))}
 
-                {/* Listas */}
                 {results.waitlists.map((w) => (
                   <div 
                     key={w.id}
                     onClick={() => handleSelect(`/dashboard/waitlists/${w.id}`)}
-                    className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm hover:bg-zinc-100 cursor-pointer text-zinc-700 transition-colors"
+                    className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800 cursor-pointer text-zinc-700 dark:text-zinc-300 transition-colors"
                   >
-                     <div className="h-8 w-8 rounded-full bg-amber-100 flex items-center justify-center text-amber-600 shrink-0">
-                        <Calendar className="h-4 w-4" />
-                     </div>
-                     <div className="flex flex-col overflow-hidden">
-                        <span className="font-medium truncate">{w.name}</span>
-                        <span className="text-xs text-zinc-400">Lista de Espera</span>
-                     </div>
+                      <div className="h-8 w-8 rounded-full bg-amber-100 dark:bg-amber-900/30 flex items-center justify-center text-amber-600 dark:text-amber-400 shrink-0">
+                         <Calendar className="h-4 w-4" />
+                      </div>
+                      <div className="flex flex-col overflow-hidden">
+                         <span className="font-medium truncate">{w.name}</span>
+                         <span className="text-xs text-zinc-400">Lista de Espera</span>
+                      </div>
                   </div>
                 ))}
              </div>
@@ -279,50 +272,54 @@ export function Header({ user }: HeaderProps) {
 
       {/* 3. DIREITA */}
       <div className="flex items-center gap-3">
+        {/* Widgets Informativos */}
         <div className="flex items-center gap-2 mr-2">
           <TimeWidget />
           <WeatherWidget />
         </div>
 
-        {/* Notificações (Mockadas por enquanto) */}
+        {/* Toggle de Tema [NOVO] */}
+        <ModeToggle />
+
+        {/* Notificações */}
         <Popover>
           <PopoverTrigger asChild>
-            <Button variant="ghost" size="icon" className="relative h-9 w-9 rounded-full text-zinc-500 hover:text-amber-600 hover:bg-amber-50 transition-colors">
+            <Button variant="ghost" size="icon" className="relative h-9 w-9 rounded-full text-zinc-500 hover:text-amber-600 hover:bg-amber-50 transition-colors dark:hover:bg-amber-900/20 dark:hover:text-amber-400">
               <Bell className="h-5 w-5" />
-              <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-red-500 border-2 border-white animate-pulse" />
+              <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-red-500 border-2 border-white dark:border-black animate-pulse" />
             </Button>
           </PopoverTrigger>
-          <PopoverContent align="end" className="w-80 p-0 rounded-xl shadow-xl">
+          <PopoverContent align="end" className="w-80 p-0 rounded-xl shadow-xl dark:bg-zinc-900 dark:border-zinc-800">
              <div className="p-4 text-center text-sm text-zinc-500">Sem notificações novas.</div>
           </PopoverContent>
         </Popover>
 
         <div className="h-6 w-px bg-zinc-200 dark:bg-zinc-800 mx-1" />
 
-        {/* DROPDOWN DO USUÁRIO FUNCIONAL */}
+        {/* DROPDOWN DO USUÁRIO */}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="ghost" className="relative flex h-10 items-center gap-2 rounded-full pl-1 pr-3 hover:bg-zinc-100">
-              <Avatar className="h-8 w-8 border border-zinc-200">
+            <Button variant="ghost" className="relative flex h-10 items-center gap-2 rounded-full pl-1 pr-3 hover:bg-zinc-100 dark:hover:bg-zinc-800">
+              <Avatar className="h-8 w-8 border border-zinc-200 dark:border-zinc-700">
                 <AvatarImage src={user.image || ""} />
-                <AvatarFallback className="bg-amber-100 text-amber-700 font-bold">{getInitials(user.name || "")}</AvatarFallback>
+                <AvatarFallback className="bg-amber-100 text-amber-700 font-bold dark:bg-amber-900 dark:text-amber-300">{getInitials(user.name || "")}</AvatarFallback>
               </Avatar>
               <div className="hidden flex-col items-start md:flex">
-                <span className="text-xs font-semibold leading-none">{user.name?.split(' ')[0]}</span>
+                <span className="text-xs font-semibold leading-none text-zinc-700 dark:text-zinc-200">{user.name?.split(' ')[0]}</span>
                 <span className="text-[10px] text-zinc-500 truncate max-w-[80px]">{user.role}</span>
               </div>
               <ChevronDown className="h-3 w-3 text-zinc-400" />
             </Button>
           </DropdownMenuTrigger>
           
-          <DropdownMenuContent className="w-56 mt-2 rounded-xl" align="end" forceMount>
+          <DropdownMenuContent className="w-56 mt-2 rounded-xl dark:bg-zinc-900 dark:border-zinc-800" align="end" forceMount>
             <DropdownMenuLabel className="font-normal p-3">
               <div className="flex flex-col space-y-1">
-                <p className="text-sm font-medium leading-none">{user.name}</p>
+                <p className="text-sm font-medium leading-none text-zinc-900 dark:text-zinc-100">{user.name}</p>
                 <p className="text-xs leading-none text-zinc-500">{user.email}</p>
               </div>
             </DropdownMenuLabel>
-            <DropdownMenuSeparator />
+            <DropdownMenuSeparator className="dark:bg-zinc-800" />
             
             <DropdownMenuItem asChild>
               <Link href="/dashboard/settings/billing" className="cursor-pointer w-full flex items-center">
@@ -338,11 +335,11 @@ export function Header({ user }: HeaderProps) {
               </Link>
             </DropdownMenuItem>
             
-            <DropdownMenuSeparator />
+            <DropdownMenuSeparator className="dark:bg-zinc-800" />
             
             <DropdownMenuItem 
-              className="cursor-pointer text-red-600 focus:text-red-700 focus:bg-red-50"
-              onClick={() => signOut({ callbackUrl: "/login" })} // <--- LOGOUT REAL
+              className="cursor-pointer text-red-600 focus:text-red-700 focus:bg-red-50 dark:focus:bg-red-900/20"
+              onClick={() => signOut({ callbackUrl: "/login" })}
             >
               <LogOut className="mr-2 h-4 w-4" />
               <span>Sair da conta</span>

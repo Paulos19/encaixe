@@ -13,11 +13,10 @@ import {
   Settings, 
   ChevronLeft, 
   ChevronRight, 
-  LogOut,
   CalendarDays, 
   ShieldAlert,  
   BarChart3,    
-  Headset, // Ícone para representar "Comercial" antes do hover
+  Headset,
   X,
   CalendarRange,
 } from "lucide-react";
@@ -118,14 +117,16 @@ export function Sidebar({ userRole = "MANAGER", usageData }: SidebarProps) {
            </button>
         )}
 
-        <div className="flex flex-col h-full px-4 py-6">
+        {/* CONTAINER INTERNO OTIMIZADO (py-4 para economizar espaço) */}
+        <div className="flex flex-col h-full px-4 py-4">
           
           {/* --- HEADER --- */}
-          <div className={cn("flex-none mb-6 transition-all duration-300", isCollapsed && !isMobile ? "justify-center" : "pl-2")}>
+          {/* mb-4 (era mb-6) para aproximar o menu */}
+          <div className={cn("flex-none mb-4 transition-all duration-300", isCollapsed && !isMobile ? "justify-center" : "pl-2")}>
             <Logo isCollapsed={isCollapsed && !isMobile} />
           </div>
 
-          {/* --- MENU --- */}
+          {/* --- MENU (Compactado) --- */}
           <div className="flex-1 min-h-0 overflow-y-auto scrollbar-hide space-y-1">
             {filteredItems.map((item, index) => {
               const isActive = pathname === item.href;
@@ -137,7 +138,8 @@ export function Sidebar({ userRole = "MANAGER", usageData }: SidebarProps) {
                   href={item.href}
                   onClick={() => isMobile && toggleSidebar()}
                   className={cn(
-                    "group relative flex items-center gap-4 rounded-xl px-3 py-3 text-sm font-medium transition-all duration-300",
+                    // py-2 (era py-3) para caber mais itens sem scroll
+                    "group relative flex items-center gap-4 rounded-xl px-3 py-2 text-sm font-medium transition-all duration-300",
                     "hover:bg-zinc-100 dark:hover:bg-zinc-900",
                     isActive 
                       ? "bg-gradient-to-r from-amber-50 to-transparent dark:from-amber-950/30 text-amber-700 dark:text-amber-400" 
@@ -154,7 +156,7 @@ export function Sidebar({ userRole = "MANAGER", usageData }: SidebarProps) {
 
                   <item.icon 
                     className={cn(
-                      "h-6 w-6 shrink-0 transition-all duration-300", 
+                      "h-5 w-5 shrink-0 transition-all duration-300", // Ícones ligeiramente menores (h-5 vs h-6) para harmonia
                       isActive ? "text-amber-600 dark:text-amber-500 scale-110 drop-shadow-sm" : "group-hover:scale-105"
                     )} 
                   />
@@ -176,7 +178,7 @@ export function Sidebar({ userRole = "MANAGER", usageData }: SidebarProps) {
             })}
           </div>
 
-          {/* --- USAGE CARD --- */}
+          {/* --- USAGE CARD (Flexível) --- */}
           <AnimatePresence>
             {!isCollapsed && hasPlanData && usageData && (
               <div className="flex-none mt-2">
@@ -191,8 +193,9 @@ export function Sidebar({ userRole = "MANAGER", usageData }: SidebarProps) {
             )}
           </AnimatePresence>
 
-          {/* --- FOOTER (SUPORTE PREMIUM + SAIR) --- */}
-          <div className="flex-none mt-2 border-t border-zinc-100 dark:border-zinc-800 pt-3 space-y-2">
+          {/* --- FOOTER (APENAS SUPORTE) --- */}
+          {/* Botão Sair removido para liberar espaço vertical */}
+          <div className="flex-none mt-2 border-t border-zinc-100 dark:border-zinc-800 pt-3">
             
             {/* LINK DO WHATSAPP (BOTÃO DE DESTAQUE) */}
             <motion.a
@@ -201,29 +204,23 @@ export function Sidebar({ userRole = "MANAGER", usageData }: SidebarProps) {
                rel="noopener noreferrer"
                className={cn(
                  "relative group flex items-center justify-center gap-3 rounded-xl px-3 py-3 text-sm font-bold text-white shadow-lg transition-all hover:scale-[1.02] hover:shadow-xl overflow-hidden",
-                 // Gradiente Linear de Destaque
                  "bg-gradient-to-r from-emerald-500 via-green-500 to-emerald-600",
                  !isMobile && isCollapsed ? "aspect-square p-0" : "w-full"
                )}
                initial={false}
                whileTap={{ scale: 0.98 }}
             >
-               {/* Efeito de Brilho no Hover */}
                <div className="absolute inset-0 bg-white/20 opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
 
-               {/* Container de Ícones com troca suave */}
                <div className="relative h-5 w-5 shrink-0">
-                  {/* Ícone 1: Headset (Default) */}
-                  <div className="absolute inset-0 flex items-center justify-center transition-all duration-300 group-hover:-translate-y-8 group-hover:opacity-0">
-                    <Headset className="h-5 w-5" />
-                  </div>
-                  {/* Ícone 2: WhatsApp (Hover) */}
-                  <div className="absolute inset-0 flex items-center justify-center translate-y-8 opacity-0 transition-all duration-300 group-hover:translate-y-0 group-hover:opacity-100">
-                    <WhatsAppIcon className="h-5 w-5 fill-white" />
-                  </div>
+                 <div className="absolute inset-0 flex items-center justify-center transition-all duration-300 group-hover:-translate-y-8 group-hover:opacity-0">
+                   <Headset className="h-5 w-5" />
+                 </div>
+                 <div className="absolute inset-0 flex items-center justify-center translate-y-8 opacity-0 transition-all duration-300 group-hover:translate-y-0 group-hover:opacity-100">
+                   <WhatsAppIcon className="h-5 w-5 fill-white" />
+                 </div>
                </div>
                
-               {/* Texto Comercial & Suporte */}
                <AnimatePresence>
                  {(isMobile || !isCollapsed) && (
                    <motion.span
@@ -237,28 +234,6 @@ export function Sidebar({ userRole = "MANAGER", usageData }: SidebarProps) {
                  )}
                </AnimatePresence>
             </motion.a>
-
-            {/* BOTÃO SAIR */}
-             <button
-               className={cn(
-                 "flex w-full items-center gap-3 rounded-xl px-3 py-2 text-sm font-medium text-zinc-500 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/10 justify-start transition-colors",
-                 !isMobile && isCollapsed && "justify-center px-0"
-               )}
-               // Adicione onClick={() => signOut()}
-             >
-               <LogOut className="h-5 w-5 shrink-0" />
-               <AnimatePresence>
-                  {(isMobile || !isCollapsed) && (
-                    <motion.span
-                      initial={{ opacity: 0, width: 0 }}
-                      animate={{ opacity: 1, width: "auto" }}
-                      exit={{ opacity: 0, width: 0 }}
-                    >
-                      Sair
-                    </motion.span>
-                  )}
-               </AnimatePresence>
-            </button>
           </div>
         </div>
       </aside>
