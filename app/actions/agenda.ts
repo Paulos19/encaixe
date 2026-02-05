@@ -3,7 +3,7 @@
 import { auth } from '@/auth';
 import { prisma } from '@/lib/prisma';
 import { revalidatePath } from 'next/cache';
-import { addMinutes, startOfDay, endOfDay, addDays } from 'date-fns';
+import { addMinutes, startOfDay, endOfDay, addDays, startOfWeek, endOfWeek, startOfMonth, endOfMonth } from 'date-fns';
 import { getClinicAvailableSlots, getClinicBookings } from '@/lib/clinic';
 
 export interface UnifiedSlot {
@@ -15,31 +15,43 @@ export interface UnifiedSlot {
   details?: string;
 }
 
-export async function getWeekSlots(startDate: Date): Promise<UnifiedSlot[]> {
+// NOVA FUNÇÃO FLEXÍVEL
+export async function getSlots(referenceDate: Date, view: 'week' | 'month' = 'week'): Promise<UnifiedSlot[]> {
   const session = await auth();
   if (!session?.user?.email) return [];
 
   const user = await prisma.user.findUnique({ where: { email: session.user.email } });
   if (!user) return [];
 
-  const start = startOfDay(startDate);
-  const endOfWeek = endOfDay(addDays(start, 6));
+  let start: Date;
+  let end: Date;
 
-  // 1. Busca Local (Prisma)
+  if (view === 'month') {
+    start = startOfMonth(referenceDate);
+    end = endOfMonth(referenceDate);
+  } else {
+    // Default Week
+    start = startOfWeek(referenceDate, { weekStartsOn: 0 }); // Domingo
+    end = endOfWeek(referenceDate, { weekStartsOn: 0 });
+  }
+
+  // 1. Busca Local
   const localSlotsPromise = prisma.agendaSlot.findMany({
     where: {
       userId: user.id,
-      startTime: { gte: start, lte: endOfWeek },
+      startTime: { gte: start, lte: end },
     },
     orderBy: { startTime: 'asc' },
   });
 
-  // 2. Busca Clinic (API) em Paralelo
+  // 2. Busca Clinic (API) - Ajusta o range da busca externa
+  const daysDiff = view === 'month' ? 35 : 7; // Mês busca ~35 dias, semana 7
+  
   const clinicDataPromise = (async () => {
     try {
       const [available, bookings] = await Promise.all([
-        getClinicAvailableSlots(start, 7),
-        getClinicBookings(start, 7)
+        getClinicAvailableSlots(start, daysDiff),
+        getClinicBookings(start, daysDiff)
       ]);
       return [...available, ...bookings] as UnifiedSlot[];
     } catch (e) {
@@ -66,8 +78,12 @@ export async function getWeekSlots(startDate: Date): Promise<UnifiedSlot[]> {
   );
 }
 
-// --- ACTIONS DE MUTAÇÃO (Mantidas iguais, mas reforçando) ---
+// Mantenha a compatibilidade se algo ainda usar getWeekSlots
+export async function getWeekSlots(date: Date) {
+    return getSlots(date, 'week');
+}
 
+// ... (Mantenha as actions createSlotAction e deleteSlotAction iguais) ...
 export async function createSlotAction(date: Date, hour: number, minute: number) {
   const session = await auth();
   if (!session?.user?.email) return { error: "Não autorizado" };
