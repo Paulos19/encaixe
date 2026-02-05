@@ -150,3 +150,59 @@ export async function getChatHistory(sessionId: string) {
     timestamp: m.createdAt.getTime()
   }));
 }
+
+export async function renameChatSession(sessionId: string, newTitle: string) {
+  const session = await auth();
+  if (!session?.user?.id) {
+    return { success: false, error: 'Não autorizado' };
+  }
+
+  try {
+    // Verifica se a sessão pertence ao usuário
+    const chatSession = await prisma.chatSession.findUnique({
+      where: { id: sessionId },
+    });
+
+    if (!chatSession || chatSession.userId !== session.user.id) {
+      return { success: false, error: 'Sessão não encontrada ou acesso negado' };
+    }
+
+    await prisma.chatSession.update({
+      where: { id: sessionId },
+      data: { title: newTitle.substring(0, 50) }, // Limite de caracteres por segurança
+    });
+
+    revalidatePath('/chat');
+    return { success: true };
+  } catch (error) {
+    console.error('Erro ao renomear sessão:', error);
+    return { success: false, error: 'Erro ao atualizar título' };
+  }
+}
+
+export async function deleteChatSession(sessionId: string) {
+  const session = await auth();
+  if (!session?.user?.id) {
+    return { success: false, error: 'Não autorizado' };
+  }
+
+  try {
+    const chatSession = await prisma.chatSession.findUnique({
+      where: { id: sessionId },
+    });
+
+    if (!chatSession || chatSession.userId !== session.user.id) {
+      return { success: false, error: 'Sessão não encontrada ou acesso negado' };
+    }
+
+    await prisma.chatSession.delete({
+      where: { id: sessionId },
+    });
+
+    revalidatePath('/chat');
+    return { success: true };
+  } catch (error) {
+    console.error('Erro ao excluir sessão:', error);
+    return { success: false, error: 'Erro ao excluir conversa' };
+  }
+}

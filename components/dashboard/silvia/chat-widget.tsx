@@ -6,7 +6,6 @@ import { MessageCircle, X, Send, Sparkles, Maximize2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
-import { ScrollArea } from '@/components/ui/scroll-area';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { cn } from '@/lib/utils';
 import { ChatMessage, sendMessageToSilvia } from '@/app/actions/silvia';
@@ -19,8 +18,10 @@ export function SilviaChatWidget() {
   const [isOpen, setIsOpen] = useState(false);
   const pathname = usePathname();
   
-  // Se já estivermos na página de chat, não mostra o widget
   if (pathname.startsWith('/chat')) return null;
+
+  // Estado para armazenar o ID da sessão atual do Widget
+  const [sessionId, setSessionId] = useState<string | undefined>(undefined);
 
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
@@ -31,25 +32,30 @@ export function SilviaChatWidget() {
   ]);
   const [inputValue, setInputValue] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const scrollViewportRef = useRef<HTMLDivElement>(null);
+  
+  const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Auto-scroll
-  useEffect(() => {
-    if (scrollViewportRef.current) {
-      const scrollElement = scrollViewportRef.current.querySelector('[data-radix-scroll-area-viewport]');
-      if (scrollElement) {
-        scrollElement.scrollTop = scrollElement.scrollHeight;
-      }
-    }
-  }, [messages, isOpen, isLoading]);
-
-  // Auto-focus quando abre
+  // Body Scroll Lock
   useEffect(() => {
     if (isOpen) {
-      setTimeout(() => inputRef.current?.focus(), 100);
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = '';
     }
+    return () => { document.body.style.overflow = ''; };
   }, [isOpen]);
+
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  };
+
+  useEffect(() => {
+    if (isOpen) {
+      setTimeout(scrollToBottom, 100);
+      setTimeout(() => inputRef.current?.focus(), 150);
+    }
+  }, [isOpen, messages, isLoading]);
 
   const handleSendMessage = async () => {
     if (!inputValue.trim() || isLoading) return;
@@ -62,9 +68,17 @@ export function SilviaChatWidget() {
     setIsLoading(true);
 
     try {
-      const response = await sendMessageToSilvia([...messages, tempUserMsg], text);
+      // Passamos o sessionId atual (se existir) para a Server Action
+      const response = await sendMessageToSilvia([...messages, tempUserMsg], text, sessionId);
+      
       if (response.success && response.messages) {
         setMessages(response.messages);
+        
+        // CORREÇÃO CRÍTICA: Se não tínhamos ID e a resposta trouxe um, salvamos.
+        // Isso garante que a próxima mensagem use o MESMO chat.
+        if (!sessionId && response.sessionId) {
+          setSessionId(response.sessionId);
+        }
       } else {
         toast.error("Erro", { description: response.error });
       }
@@ -72,18 +86,19 @@ export function SilviaChatWidget() {
       toast.error("Erro de conexão");
     } finally {
       setIsLoading(false);
-      // Mantém o foco após envio
       setTimeout(() => inputRef.current?.focus(), 100);
     }
   };
+
+  // Link Dinâmico: Se tiver ID, vai para a conversa. Se não, vai para nova.
+  const expandLink = sessionId ? `/chat/${sessionId}` : '/chat';
 
   return (
     <>
       <AnimatePresence>
         {isOpen && (
           <>
-            {/* 1. OVERLAY (BACKDROP) */}
-            {/* Z-Index 60 para ficar ACIMA da Sidebar (z-50) e do Header (z-30) */}
+            {/* OVERLAY */}
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
@@ -92,21 +107,16 @@ export function SilviaChatWidget() {
               className="fixed inset-0 bg-black/60 backdrop-blur-[2px] z-[60]"
             />
 
-            {/* 2. WIDGET CONTAINER */}
-            {/* Z-Index 70 para ficar acima do Overlay */}
+            {/* WIDGET */}
             <motion.div
               initial={{ opacity: 0, scale: 0.95, y: 20 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.95, y: 20 }}
               className="fixed bottom-6 right-6 z-[70] origin-bottom-right"
             >
-              <Card className={cn(
-                "flex flex-col shadow-2xl border-primary/20 overflow-hidden bg-background",
-                // 3. AJUSTE DE ALTURA
-                // h-[550px] é menor que o anterior. max-h-[85vh] garante que cabe em telas menores.
-                "w-[380px] h-[550px] max-h-[85vh]"
-              )}>
-                {/* Header */}
+              <Card className="flex flex-col shadow-2xl border-primary/20 bg-background overflow-hidden w-[380px] h-[550px] max-h-[85vh]">
+                
+                {/* HEADER */}
                 <div className="bg-primary px-4 py-3 flex items-center justify-between text-primary-foreground shadow-md z-10 shrink-0">
                   <div className="flex items-center gap-3">
                     <div className="relative">
@@ -124,7 +134,8 @@ export function SilviaChatWidget() {
                     </div>
                   </div>
                   <div className="flex items-center gap-1">
-                    <Link href="/chat">
+                    {/* LINK CORRIGIDO */}
+                    <Link href={expandLink}>
                       <Button variant="ghost" size="icon" className="h-8 w-8 text-primary-foreground hover:bg-white/20" title="Expandir para tela cheia">
                         <Maximize2 className="w-4 h-4" />
                       </Button>
@@ -138,22 +149,25 @@ export function SilviaChatWidget() {
                   </div>
                 </div>
 
-                {/* Chat Area */}
-                <ScrollArea className="flex-1 bg-muted/10 p-0" ref={scrollViewportRef}>
-                  <div className="flex flex-col py-4 px-2">
+                {/* AREA DE MENSAGENS */}
+                <div className="flex-1 overflow-y-auto min-h-0 bg-muted/10 p-0 overscroll-contain custom-scrollbar">
+                  <div className="flex flex-col py-4 px-2 min-h-full">
                      {messages.map((msg, idx) => (
                         <ChatMessageBubble key={idx} role={msg.role} content={msg.content} timestamp={msg.timestamp} />
                      ))}
+                     
                      {isLoading && (
                        <div className="px-6 py-4 text-xs text-muted-foreground animate-pulse flex items-center gap-2">
                          <Sparkles className="w-3 h-3 text-primary" /> Silvia está digitando...
                        </div>
                      )}
+                     
+                     <div ref={messagesEndRef} className="h-1" />
                   </div>
-                </ScrollArea>
+                </div>
 
-                {/* Input Area */}
-                <div className="p-3 border-t bg-background shrink-0">
+                {/* INPUT AREA */}
+                <div className="p-3 border-t bg-background shrink-0 z-20">
                   <form 
                     onSubmit={(e) => { e.preventDefault(); handleSendMessage(); }}
                     className="flex gap-2 items-end bg-muted/50 p-1.5 rounded-3xl border focus-within:ring-2 ring-primary/10 transition-all"
@@ -182,8 +196,7 @@ export function SilviaChatWidget() {
         )}
       </AnimatePresence>
 
-      {/* Botão Flutuante (Sempre visível se fechado) */}
-      {/* Z-Index 50 para ficar no nível da Sidebar, mas abaixo do Overlay quando aberto */}
+      {/* FAB */}
       <motion.div 
         className="fixed bottom-6 right-6 z-50"
         animate={{ scale: isOpen ? 0 : 1, opacity: isOpen ? 0 : 1 }}
