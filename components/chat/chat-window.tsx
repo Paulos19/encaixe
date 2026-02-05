@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { Send, Menu, Plus, Sparkles, Eraser, ChevronDown, Bot, FileSpreadsheet, Loader2 } from 'lucide-react';
+import { Send, Menu, Plus, Sparkles, Eraser, ChevronDown, Bot, FileSpreadsheet, Loader2, Zap } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Sheet, SheetContent, SheetTrigger, SheetTitle } from "@/components/ui/sheet";
@@ -10,7 +10,8 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { ChatSidebar } from "@/components/chat/chat-sidebar";
 import { ChatMessageBubble } from '@/components/chat/chat-message-bubble';
 import { sendMessageToSilvia, ChatMessage } from '@/app/actions/silvia';
-import { importPatientsBulk } from '@/app/actions/patient'; // [NOVO] Action criada
+import { importPatientsBulk } from '@/app/actions/patient';
+import { ChatTriggerDialog } from '@/components/chat/chat-trigger-dialog'; // [NOVO]
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -22,7 +23,7 @@ import {
   DropdownMenuTrigger,
   DropdownMenuSeparator
 } from "@/components/ui/dropdown-menu";
-import * as XLSX from 'xlsx'; // [NOVO] Importação do XLSX
+import * as XLSX from 'xlsx';
 
 interface ChatWindowProps {
   initialMessages?: ChatMessage[];
@@ -43,11 +44,12 @@ export function ChatWindow({
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [sessionId, setSessionId] = useState<string | undefined>(initialSessionId);
-  const [isUploading, setIsUploading] = useState(false); // [NOVO] Estado de upload
+  const [isUploading, setIsUploading] = useState(false);
+  const [isTriggerOpen, setIsTriggerOpen] = useState(false); // [NOVO] Estado do dialog
   
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null); // [NOVO] Ref para input de arquivo
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const currentSession = sessions?.find(s => s.id === sessionId);
   const chatTitle = currentSession?.title || "Nova Conversa";
@@ -68,7 +70,6 @@ export function ChatWindow({
   const handleSubmit = async (e?: React.FormEvent, customMessage?: string, hiddenPrompt?: string) => {
     e?.preventDefault();
     const textToSend = customMessage || input;
-    // Se houver um hiddenPrompt (usado para injeção de contexto de arquivo), usamos ele para a API, mas mostramos textToSend na UI
     const apiMessage = hiddenPrompt || textToSend;
 
     if (!textToSend.trim() && !hiddenPrompt) return;
@@ -85,13 +86,11 @@ export function ChatWindow({
       return;
     }
 
-    // Na UI mostramos o que o usuário "fez" (ex: "Importei planilha")
     const tempUserMsg: ChatMessage = { role: 'user', content: textToSend, timestamp: Date.now() };
     setMessages(prev => [...prev, tempUserMsg]);
     setIsLoading(true);
 
     try {
-      // Enviamos para a Silvia (pode ser o texto normal ou o prompt de sistema injetado)
       const response = await sendMessageToSilvia(messages, apiMessage, sessionId);
       
       if (response.success && response.messages) {
@@ -127,7 +126,7 @@ export function ChatWindow({
     }
   };
 
-  // --- LÓGICA DE UPLOAD DE ARQUIVO ---
+  // --- LÓGICA DE UPLOAD ---
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -143,7 +142,6 @@ export function ChatWindow({
         const ws = wb.Sheets[wsname];
         const jsonData = XLSX.utils.sheet_to_json(ws, { header: 1 });
 
-        // Parser Simples (Mesma lógica do dialog)
         const headers = (jsonData[0] as string[]).map(h => String(h).toLowerCase());
         const rows = jsonData.slice(1);
 
@@ -156,52 +154,56 @@ export function ChatWindow({
         })).filter(r => r.name && r.phone);
 
         if (formattedData.length === 0) {
-          toast.error("Nenhum dado válido encontrado na planilha.");
+          toast.error("Nenhum dado válido encontrado.");
           setIsUploading(false);
           return;
         }
 
-        // Salvar no Banco
         const result = await importPatientsBulk(formattedData);
 
         if (result.success && result.names) {
           toast.success(`${result.count} pacientes processados.`);
-          
-          // Dispara mensagem para a Silvia com contexto do sistema
-          // A UI mostra "📄 Importar planilha...", mas a Silvia recebe os dados técnicos
           const userDisplayMessage = `📄 Importar planilha de pacientes (${result.count} registros)`;
           const systemPrompt = `[AÇÃO DE SISTEMA: IMPORTAÇÃO DE ARQUIVO]
-O usuário acabou de importar uma planilha Excel com ${result.count} pacientes.
-Status: Sucesso.
-Nomes registrados: ${result.names.join(', ')}.
-Instrução: Aja naturalmente. Confirme que você recebeu os dados, informe a quantidade e liste os nomes importados para o usuário conferir.`;
-
+Status: Sucesso. ${result.count} importados. Nomes: ${result.names.join(', ')}.
+Instrução: Confirme o recebimento e pergunte se desejo iniciar uma lista de espera.`;
+          
           await handleSubmit(undefined, userDisplayMessage, systemPrompt);
         } else {
-          toast.error("Erro ao salvar dados da planilha.");
+          toast.error("Erro ao salvar dados.");
         }
       } catch (error) {
-        console.error(error);
         toast.error("Erro ao processar arquivo.");
       } finally {
         setIsUploading(false);
-        // Limpa o input para permitir selecionar o mesmo arquivo novamente
         if (fileInputRef.current) fileInputRef.current.value = '';
       }
     };
     reader.readAsBinaryString(file);
   };
 
+  // --- LÓGICA DE CALLBACK DO DISPARO ---
+  const handleTriggerSuccess = async (listName: string, slotTime: string) => {
+    const userDisplayMessage = `⚡ Disparar vaga na lista "${listName}" para ${slotTime}`;
+    const systemPrompt = `[AÇÃO DE SISTEMA: DISPARO DE VAGA REALIZADO]
+O usuário acabou de usar a ferramenta de disparo manual com sucesso.
+Lista: ${listName}
+Horário Ofertado: ${slotTime}
+Instrução: Aja como uma assistente eficiente. Informe que o primeiro paciente da fila já foi notificado e que avisarei assim que ele responder.`;
+
+    await handleSubmit(undefined, userDisplayMessage, systemPrompt);
+  };
+
   return (
     <div className="flex flex-col h-full bg-background relative font-sans transition-colors duration-300">
       
-      {/* Input Oculto para Arquivo */}
-      <input 
-        type="file" 
-        ref={fileInputRef}
-        onChange={handleFileUpload}
-        accept=".xlsx, .xls, .csv"
-        className="hidden"
+      <input type="file" ref={fileInputRef} onChange={handleFileUpload} accept=".xlsx, .xls, .csv" className="hidden" />
+      
+      {/* DIALOG DE DISPARO */}
+      <ChatTriggerDialog 
+        open={isTriggerOpen} 
+        onOpenChange={setIsTriggerOpen} 
+        onSuccess={handleTriggerSuccess}
       />
 
       {/* --- HEADER --- */}
@@ -339,7 +341,7 @@ Instrução: Aja naturalmente. Confirme que você recebeu os dados, informe a qu
               "bg-muted/30 focus-within:bg-background focus-within:ring-2 ring-primary/20 ring-offset-2 ring-offset-background"
             )}
           >
-            {/* MENU DE ANEXOS (SUBSTITUI O BOTÃO PLUS SIMPLES) */}
+            {/* MENU DE AÇÕES */}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button 
@@ -356,6 +358,7 @@ Instrução: Aja naturalmente. Confirme que você recebeu os dados, informe a qu
                 <div className="px-2 py-1.5 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
                   Adicionar ao contexto
                 </div>
+                
                 <DropdownMenuItem 
                   className="gap-3 cursor-pointer"
                   onClick={() => fileInputRef.current?.click()}
@@ -368,6 +371,20 @@ Instrução: Aja naturalmente. Confirme que você recebeu os dados, informe a qu
                     <span className="text-[10px] text-muted-foreground">Pacientes (.xlsx, .csv)</span>
                   </div>
                 </DropdownMenuItem>
+
+                <DropdownMenuItem 
+                  className="gap-3 cursor-pointer"
+                  onClick={() => setIsTriggerOpen(true)}
+                >
+                  <div className="h-8 w-8 rounded-lg bg-amber-100 text-amber-700 flex items-center justify-center border border-amber-200">
+                    <Zap className="w-4 h-4" />
+                  </div>
+                  <div className="flex flex-col">
+                    <span className="font-medium">Disparar Vaga</span>
+                    <span className="text-[10px] text-muted-foreground">Notificar lista de espera</span>
+                  </div>
+                </DropdownMenuItem>
+
               </DropdownMenuContent>
             </DropdownMenu>
 

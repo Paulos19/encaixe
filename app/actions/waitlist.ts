@@ -269,3 +269,22 @@ export async function deleteWaitlist(waitlistId: string) {
     return { error: "Erro ao excluir a lista. Tente novamente." };
   }
 }
+
+export async function getWaitlistsOptions() {
+  const session = await auth();
+  if (!session?.user?.email) return [];
+
+  try {
+    const user = await prisma.user.findUnique({ where: { email: session.user.email } });
+    if (!user) return [];
+
+    const waitlists = await prisma.waitlist.findMany({
+      where: { ownerId: user.id },
+      select: { id: true, name: true },
+      orderBy: { createdAt: 'desc' }
+    });
+    return waitlists;
+  } catch (error) {
+    return [];
+  }
+}
