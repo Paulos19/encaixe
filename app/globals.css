@@ -147,17 +147,29 @@
 
 /* --- UTILITÁRIOS DE ANIMAÇÃO E GRADIENTES --- */
 @layer utilities {
-  .text-gradient-gold {
-    @apply bg-clip-text text-transparent bg-gradient-to-r from-amber-200 via-amber-500 to-amber-700;
+  /* Scrollbar Aconchegante e Moderna */
+  .custom-scrollbar::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
   }
   
-  /* Borda com gradiente sutil para cards */
-  .border-gradient-onyx {
-    @apply border border-transparent bg-gradient-to-br from-white/10 to-transparent bg-clip-padding;
+  .custom-scrollbar::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  
+  .custom-scrollbar::-webkit-scrollbar-thumb {
+    background-color: hsl(var(--muted-foreground) / 0.2);
+    border-radius: 10px;
+    transition: background-color 0.2s;
+  }
+  
+  .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+    background-color: hsl(var(--muted-foreground) / 0.4);
   }
 
-  /* Efeito de vidro para cards */
-  .glass-card {
-    @apply bg-sidebar/50 backdrop-blur-xl border border-sidebar-border shadow-2xl;
+  /* Para Firefox */
+  .custom-scrollbar {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--muted-foreground) / 0.2) transparent;
   }
 }
