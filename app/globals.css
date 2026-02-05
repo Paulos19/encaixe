@@ -131,45 +131,46 @@
   }
 }
 
-/* --- SCROLLBAR PREMIUM (Chrome/Edge/Safari) --- */
-::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
-}
-
-::-webkit-scrollbar-track {
-  @apply bg-sidebar;
-}
-
-::-webkit-scrollbar-thumb {
-  @apply bg-zinc-700/50 rounded-full border-2 border-transparent bg-clip-content hover:bg-amber-600/50 transition-colors;
-}
-
-/* --- UTILITÁRIOS DE ANIMAÇÃO E GRADIENTES --- */
+/* --- SCROLLBAR MODERNA & INVISÍVEL --- */
 @layer utilities {
-  /* Scrollbar Aconchegante e Moderna */
-  .custom-scrollbar::-webkit-scrollbar {
+  /* Scrollbar que aparece apenas no Hover (Estilo macOS) */
+  .scrollbar-hover {
+    overflow-y: auto;
+    scrollbar-gutter: stable; /* Evita layout shift quando a barra aparece/desaparece */
+    scrollbar-width: thin; /* Firefox */
+    scrollbar-color: transparent transparent; /* Firefox: Thumb Track (Invisível por padrão) */
+    transition: scrollbar-color 0.3s ease;
+  }
+
+  /* Ao passar o mouse sobre o container, a scrollbar aparece */
+  .scrollbar-hover:hover {
+    scrollbar-color: oklch(var(--muted-foreground) / 0.3) transparent;
+  }
+
+  /* Webkit (Chrome/Edge/Safari) */
+  .scrollbar-hover::-webkit-scrollbar {
     width: 6px;
     height: 6px;
-  }
-  
-  .custom-scrollbar::-webkit-scrollbar-track {
-    background: transparent;
-  }
-  
-  .custom-scrollbar::-webkit-scrollbar-thumb {
-    background-color: hsl(var(--muted-foreground) / 0.2);
-    border-radius: 10px;
-    transition: background-color 0.2s;
-  }
-  
-  .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-    background-color: hsl(var(--muted-foreground) / 0.4);
+    background-color: transparent; /* Track transparente */
   }
 
-  /* Para Firefox */
-  .custom-scrollbar {
-    scrollbar-width: thin;
-    scrollbar-color: hsl(var(--muted-foreground) / 0.2) transparent;
+  .scrollbar-hover::-webkit-scrollbar-track {
+    background-color: transparent;
+  }
+
+  .scrollbar-hover::-webkit-scrollbar-thumb {
+    background-color: transparent;
+    border-radius: 9999px;
+    transition: background-color 0.3s ease;
+  }
+
+  /* Hover no container revela o thumb */
+  .scrollbar-hover:hover::-webkit-scrollbar-thumb {
+    background-color: oklch(var(--muted-foreground) / 0.3);
+  }
+  
+  /* Hover direto na scrollbar a deixa mais escura para feedback visual */
+  .scrollbar-hover::-webkit-scrollbar-thumb:hover {
+    background-color: oklch(var(--muted-foreground) / 0.5);
   }
 }
