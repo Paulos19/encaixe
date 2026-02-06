@@ -2,6 +2,7 @@ import nodemailer from 'nodemailer';
 import { render } from '@react-email/render';
 import { WelcomeEmail } from '@/emails/welcome-email';
 import { SubscriptionSuccessEmail } from '@/emails/subscription-success-email';
+import SilviaMessageEmail from '@/emails/silvia-message-email';
 
 const transporter = nodemailer.createTransport({
   host: process.env.EMAIL_SERVER_HOST,
@@ -83,13 +84,19 @@ export async function sendPasswordResetToken(email: string, token: string) {
 
 export async function sendCustomEmail(to: string, subject: string, htmlContent: string) {
   try {
+    // Renderiza o template bonito com o conteúdo da Silvia dentro
+    const emailHtml = await render(SilviaMessageEmail({ 
+      content: htmlContent, 
+      subject: subject 
+    }));
+
     await transporter.sendMail({
       from: process.env.EMAIL_FROM,
       to,
       subject,
-      html: htmlContent, // A IA pode mandar HTML básico (<p>, <br>, <b>)
+      html: emailHtml, // Envia o HTML renderizado do React Email
     });
-    console.log(`📧 Email customizado enviado para ${to}`);
+    console.log(`📧 Email customizado (estilizado) enviado para ${to}`);
     return { success: true };
   } catch (error: any) {
     console.error("❌ Erro ao enviar email customizado:", error);
