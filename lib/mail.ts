@@ -80,3 +80,19 @@ export async function sendPasswordResetToken(email: string, token: string) {
     console.error("❌ Erro ao enviar email de reset:", error);
   }
 }
+
+export async function sendCustomEmail(to: string, subject: string, htmlContent: string) {
+  try {
+    await transporter.sendMail({
+      from: process.env.EMAIL_FROM,
+      to,
+      subject,
+      html: htmlContent, // A IA pode mandar HTML básico (<p>, <br>, <b>)
+    });
+    console.log(`📧 Email customizado enviado para ${to}`);
+    return { success: true };
+  } catch (error: any) {
+    console.error("❌ Erro ao enviar email customizado:", error);
+    throw new Error(error.message);
+  }
+}
