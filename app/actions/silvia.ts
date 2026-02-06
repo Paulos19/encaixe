@@ -52,8 +52,36 @@ export async function sendMessageToSilvia(
       }
     });
 
-    // 3. Chamar n8n (Silvia)
-    const N8N_URL = process.env.N8N_SILVIA_WEBHOOK_URL;
+    // 3. Preparar Contexto Temporal (CORREÇÃO DE ANO/DATA)
+    // Isso impede a "alucinação" de datas antigas (ex: 2024)
+    const now = new Date();
+    const dataAtual = now.toLocaleDateString('pt-BR', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+    const horaAtual = now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+
+    // Injeta o contexto no topo da mensagem
+    const messageWithContext = `
+[CONTEXTO DE SISTEMA]
+Data Atual: ${dataAtual}
+Hora Atual: ${horaAtual}
+Usuário: ${session.user.name}
+--------------------------------
+${newMessage}`;
+
+    // 4. Preparar Histórico para o N8N
+    // Recuperamos as últimas 10 mensagens do banco para dar memória à Silvia
+    const dbHistory = await prisma.chatMessage.findMany({
+      where: { sessionId: currentSessionId },
+      orderBy: { createdAt: 'desc' },
+      take: 10
+    });
+
+    // Formata: "Human: ... \n Assistant: ..."
+    const formattedHistory = dbHistory.reverse().map(m => 
+      `${m.role === 'user' ? 'Human' : 'Assistant'}: ${m.content}`
+    ).join('\n');
+
+    // 5. Chamar n8n (Silvia)
+    const N8N_URL = process.env.N8N_SILVIA_WEBHOOK_URL || process.env.N8N_WEBHOOK_URL;
     const API_KEY = process.env.N8N_API_KEY;
 
     if (!N8N_URL) throw new Error("Configuração do n8n ausente");
@@ -66,10 +94,14 @@ export async function sendMessageToSilvia(
       },
       body: JSON.stringify({
         userId,
-        sessionId: currentSessionId, // Importante para o n8n saber o contexto
-        message: newMessage,
-        userEmail: session.user.email,
+        sessionId: currentSessionId,
         userName: session.user.name,
+        userEmail: session.user.email,
+        
+        // Campos para o AI Agent do N8N:
+        chatInput: messageWithContext,  // Mensagem com a data injetada
+        chatHistory: formattedHistory,  // Histórico formatado
+        message: messageWithContext,    // Fallback caso seu workflow use 'message'
       }),
       cache: 'no-store'
     });
@@ -78,20 +110,26 @@ export async function sendMessageToSilvia(
       throw new Error(`Erro n8n: ${response.status}`);
     }
 
-    // 4. Processar Resposta
+    // 6. Processar Resposta
     const textResponse = await response.text();
     let botText = "";
     
     try {
       const json = JSON.parse(textResponse);
-      botText = json.output || json.text || json.response || json.message || textResponse;
+      // Tenta várias chaves comuns de retorno de IA
+      botText = json.output || json.text || json.response || json.message || (typeof json === 'string' ? json : JSON.stringify(json));
     } catch {
       botText = textResponse;
     }
 
-    if (!botText.trim()) botText = "Estou processando, mas fiquei sem resposta. Verifique meu status.";
+    // Limpeza de aspas extras se houver
+    if (typeof botText === 'string' && botText.startsWith('"') && botText.endsWith('"')) {
+       try { botText = JSON.parse(botText); } catch {}
+    }
 
-    // 5. Persistir Resposta da IA
+    if (!botText || !botText.trim()) botText = "Estou processando, mas fiquei sem resposta. Verifique meu status.";
+
+    // 7. Persistir Resposta da IA
     await prisma.chatMessage.create({
       data: {
         sessionId: currentSessionId,
@@ -100,17 +138,16 @@ export async function sendMessageToSilvia(
       }
     });
 
-    // Atualiza o 'updatedAt' da sessão para ela subir na lista
+    // Atualiza o 'updatedAt' da sessão para ela subir na lista da sidebar
     await prisma.chatSession.update({
       where: { id: currentSessionId },
       data: { updatedAt: new Date() }
     });
 
-    revalidatePath('/chat'); // Atualiza a sidebar
+    revalidatePath('/chat');
     
-    // 6. Retornar Histórico Atualizado do Banco
-    // Buscamos tudo do banco para garantir sincronia perfeita
-    const dbMessages = await prisma.chatMessage.findMany({
+    // 8. Retornar Histórico Completo Atualizado do Banco
+    const finalMessages = await prisma.chatMessage.findMany({
       where: { sessionId: currentSessionId },
       orderBy: { createdAt: 'asc' }
     });
@@ -118,7 +155,7 @@ export async function sendMessageToSilvia(
     return {
       success: true,
       sessionId: currentSessionId,
-      messages: dbMessages.map(m => ({
+      messages: finalMessages.map(m => ({
         role: m.role as 'user' | 'assistant',
         content: m.content,
         timestamp: m.createdAt.getTime()
@@ -127,11 +164,12 @@ export async function sendMessageToSilvia(
 
   } catch (error: any) {
     console.error("[Silvia Action]", error);
-    return { success: false, error: "Falha ao processar mensagem." };
+    return { success: false, error: "Falha ao processar mensagem. Tente novamente." };
   }
 }
 
-// Action extra para carregar histórico ao abrir a página
+// --- Funções Auxiliares de Sessão ---
+
 export async function getChatHistory(sessionId: string) {
   const session = await auth();
   if (!session?.user?.id) return [];
@@ -158,7 +196,6 @@ export async function renameChatSession(sessionId: string, newTitle: string) {
   }
 
   try {
-    // Verifica se a sessão pertence ao usuário
     const chatSession = await prisma.chatSession.findUnique({
       where: { id: sessionId },
     });
@@ -169,7 +206,7 @@ export async function renameChatSession(sessionId: string, newTitle: string) {
 
     await prisma.chatSession.update({
       where: { id: sessionId },
-      data: { title: newTitle.substring(0, 50) }, // Limite de caracteres por segurança
+      data: { title: newTitle.substring(0, 50) },
     });
 
     revalidatePath('/chat');

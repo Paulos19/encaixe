@@ -22,12 +22,24 @@ export async function GET(req: Request) {
       days: searchParams.get('days'),
     });
 
-    const startDate = params.date ? parseISO(params.date) : new Date();
+    // 1. Definição da Data Base
+    let startDate = params.date ? parseISO(params.date) : new Date();
+    const currentYear = new Date().getFullYear();
+
+    // --- CORREÇÃO DE ANO (FIX 2024 -> 2026) ---
+    // Se a IA mandar um ano menor que o atual (ex: 2024), forçamos o ano corrente.
+    // Isso corrige alucinações de data.
+    if (startDate.getFullYear() < currentYear) {
+      console.warn(`⚠️ Data antiga detectada (${startDate.getFullYear()}). Corrigindo para ${currentYear}.`);
+      startDate.setFullYear(currentYear);
+    }
+    // ------------------------------------------
+
     const endDate = addDays(startDate, params.days);
     
     console.log(`🤖 Silvia Consultando: De ${startDate.toISOString()} até ${endDate.toISOString()} (${params.days} dias)`);
 
-    // 1. Busca Slots MANUAIS
+    // 2. Busca Slots MANUAIS
     const manualSlots = await prisma.agendaSlot.findMany({
       where: {
         userId: params.userId,
@@ -39,18 +51,15 @@ export async function GET(req: Request) {
       },
     });
 
-    // 2. Busca Slots CLINIC
+    // 3. Busca Slots CLINIC
     let clinicSlots: any[] = [];
     try {
       clinicSlots = await clinicService.getAvailableSlots(startDate, params.days);
     } catch (e: any) {
       console.error("⚠️ Falha ao buscar Clinic Slots:", e.message);
-      // Se quiser que a Silvia avise do erro, descomente abaixo. 
-      // Se preferir que ela mostre só os manuais mesmo com erro no clinic, mantenha o catch silencioso (apenas log).
-      // return NextResponse.json({ error: "Erro de comunicação com a agenda da Clínica. Tente novamente." }, { status: 502 });
     }
 
-    // 3. MERGE
+    // 4. MERGE
     const slotMap = new Map<string, any>();
 
     manualSlots.forEach(slot => {
@@ -79,7 +88,7 @@ export async function GET(req: Request) {
       .sort((a, b) => a.startTime.getTime() - b.startTime.getTime())
       .map(({ startTime, ...rest }) => rest);
 
-    console.log(`📊 Total Slots Encontrados: ${finalSlots.length} (Clinic: ${clinicSlots.length}, Manual: ${manualSlots.length})`);
+    console.log(`📊 Total Slots: ${finalSlots.length} (Corrigido para ${startDate.toLocaleDateString('pt-BR')})`);
 
     if (finalSlots.length === 0) {
       return NextResponse.json({ 
@@ -91,7 +100,8 @@ export async function GET(req: Request) {
     return NextResponse.json({
       total: finalSlots.length,
       periodo: `${params.days} dias`,
-      horarios_disponiveis: finalSlots.slice(0, 30) // Aumentei para 30 para cobrir mais opções
+      data_inicio_considerada: startDate.toLocaleDateString('pt-BR'), // Informa a Silvia a data real usada
+      horarios_disponiveis: finalSlots.slice(0, 30)
     });
 
   } catch (error: any) {
