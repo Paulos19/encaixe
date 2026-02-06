@@ -116,19 +116,21 @@ model WaitlistEntry {
 }
 
 model AgendaSlot {
-  id     String @id @default(cuid())
-  userId String
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   startTime DateTime
   endTime   DateTime
 
-  isBooked Boolean @default(false)
+  isBooked  Boolean  @default(false)
+  
+  // Campo que estava faltando:
+  notes     String?  // <--- ADICIONE ISTO
 
-  // --- CAMPO NOVO: VÍNCULO DO AGENDAMENTO ---
+  // Vínculo do agendamento
   patientId String?
   patient   Patient? @relation(fields: [patientId], references: [id])
-  // ------------------------------------------
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

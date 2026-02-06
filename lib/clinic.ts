@@ -125,7 +125,7 @@ class ClinicService {
         const endTime = addMinutes(startTime, 30); 
 
         return {
-          id: `clinic-free-${isoString}`,
+          id: `clinic-free-${isoString}`, // ID Único para identificar que veio da API
           startTime: startTime,
           endTime: endTime,
           isBooked: false,
@@ -175,6 +175,54 @@ class ClinicService {
       return [];
     }
   }
+
+  /**
+   * NOVO: Cria um agendamento na API externa
+   * Usado pela Silvia para confirmar marcação
+   */
+  public async createBooking(date: Date, patient: { name: string; phone: string; birthDate?: Date | null }) {
+    if (!BASE_URL) throw new Error("URL da API não configurada.");
+
+    try {
+      const token = await this.getAccessToken();
+      
+      // Regra de negócio: Duração fixa de 30 minutos
+      const endDate = addMinutes(date, 30);
+
+      const url = `${BASE_URL}/api/v1/integration/facilities/${FACILITY_ID}/doctors/${DOCTOR_ID}/addresses/${ADDRESS_ID}/bookings`;
+
+      // Payload padrão para CRM (formatação estrita yyyy-MM-dd HH:mm:ss)
+      const payload = {
+        start_date: format(date, "yyyy-MM-dd HH:mm:ss"),
+        end_date: format(endDate, "yyyy-MM-dd HH:mm:ss"),
+        note: "Agendado via Silvia (Encaixe Já)",
+        patient: {
+          name: patient.name,
+          mobile_phone: patient.phone, // Formato esperado pelo CRM
+          // Se tiver data de nascimento, formata yyyy-MM-dd, senão null
+          birth_date: patient.birthDate ? format(patient.birthDate, "yyyy-MM-dd") : null
+        }
+      };
+
+      const response = await axios.post(url, payload, {
+        headers: { 
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+      });
+
+      return {
+        success: true,
+        bookingId: response.data.id || 'external-id',
+        time: date
+      };
+
+    } catch (error: any) {
+      console.error("❌ Erro Create Booking:", error.response?.data || error.message);
+      // Repassa o erro detalhado da API para o frontend/Silvia
+      throw new Error(error.response?.data?.message || "Erro ao conectar com a agenda da clínica.");
+    }
+  }
 }
 
 // --- EXPORTS ---
@@ -182,6 +230,6 @@ class ClinicService {
 // 1. Instância principal (singleton) para usar métodos da classe
 export const clinicService = new ClinicService();
 
-// 2. Funções soltas (Wrappers) para compatibilidade com códigos legados (Agenda, Debug, etc)
+// 2. Funções soltas (Wrappers) para compatibilidade com códigos legados
 export const getClinicAvailableSlots = (startDate: Date, days: number = 7) => clinicService.getAvailableSlots(startDate, days);
 export const getClinicBookings = (startDate: Date, days: number = 7) => clinicService.getBookings(startDate, days);

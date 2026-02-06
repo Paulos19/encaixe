@@ -1,79 +1,82 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { clinicService } from '@/lib/clinic';
 import { z } from 'zod';
 
 const BookSchema = z.object({
   userId: z.string().cuid(),
-  slotId: z.string().cuid(),
+  slotId: z.string().min(1),
   patientId: z.string().cuid(),
 });
 
 export async function POST(req: Request) {
-  // 1. Verificação de Segurança (API Key)
   const apiKey = req.headers.get('x-api-key');
-  if (apiKey !== process.env.N8N_API_KEY) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  }
+  if (apiKey !== process.env.N8N_API_KEY) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   try {
     const body = await req.json();
-    
-    // 2. Validação dos dados de entrada
     const { userId, slotId, patientId } = BookSchema.parse(body);
 
-    // 3. Transação Atômica: Garante que verificamos e agendamos "ao mesmo tempo"
-    const appointment = await prisma.$transaction(async (tx) => {
-      
-      // A. Verifica o Slot
-      const slot = await tx.agendaSlot.findUnique({
-        where: { id: slotId }
+    const patient = await prisma.patient.findUnique({
+      where: { id: patientId }
+    });
+
+    if (!patient) return NextResponse.json({ error: 'Paciente não encontrado.' }, { status: 404 });
+
+    // --- CENÁRIO 1: Agendamento Externo (Clinic) ---
+    if (slotId.startsWith('clinic_')) {
+      const isoDate = slotId.replace('clinic_', '');
+      const date = new Date(isoDate);
+
+      // 1. Tenta agendar na API da Clínica
+      // A função createBooking já envia os dados do paciente. 
+      // Se ele não existir lá, o CRM geralmente cria ou usa os dados enviados.
+      await clinicService.createBooking(date, {
+        name: patient.name,
+        phone: patient.phone,
+        birthDate: patient.birthDate
       });
 
-      if (!slot) throw new Error("Horário não encontrado.");
-      if (slot.userId !== userId) throw new Error("Este horário pertence a outro médico.");
-      if (slot.isBooked) throw new Error("Este horário já foi preenchido/agendado.");
-
-      // B. Verifica o Paciente
-      const patient = await tx.patient.findUnique({
-        where: { id: patientId }
-      });
-
-      if (!patient) throw new Error("Paciente não encontrado.");
-      if (patient.managerId !== userId) throw new Error("Paciente não pertence à sua carteira.");
-
-      // C. Executa o Agendamento
-      const updatedSlot = await tx.agendaSlot.update({
-        where: { id: slotId },
+      // 2. SUCESSO! Agora criamos o espelho no banco LOCAL (Encaixe Já)
+      // Isso satisfaz sua regra: "registrar no banco de dados com slot igual ao do clinic"
+      await prisma.agendaSlot.create({
         data: {
+          userId,
+          startTime: date,
+          endTime: new Date(date.getTime() + 30 * 60000), // +30 min
           isBooked: true,
-          patientId: patientId, // <--- Aqui está o vínculo que faltava
-        },
-        include: {
-          patient: {
-            select: { name: true, phone: true }
-          }
+          patientId: patient.id,
+          notes: "Agendado via Integração Clinic (Silvia)"
         }
       });
 
-      return updatedSlot;
-    });
+      return NextResponse.json({
+        success: true,
+        message: `Confirmado! Agendei ${patient.name} para ${date.toLocaleString('pt-BR')} no sistema da Clínica. ✅`
+      });
+    }
 
-    // 4. Retorno formatado para a IA entender
-    return NextResponse.json({
-      success: true,
-      message: `Agendamento confirmado para ${appointment.patient?.name} no dia ${new Date(appointment.startTime).toLocaleString('pt-BR')}.`,
-      details: {
-        slotId: appointment.id,
-        patient: appointment.patient?.name,
-        time: appointment.startTime
+    // --- CENÁRIO 2: Agendamento Interno (Manual) ---
+    else {
+      const slot = await prisma.agendaSlot.findUnique({ where: { id: slotId } });
+      
+      if (!slot || slot.isBooked) {
+        return NextResponse.json({ error: 'Este horário não está mais disponível.' }, { status: 409 });
       }
-    });
+
+      await prisma.agendaSlot.update({
+        where: { id: slotId },
+        data: { isBooked: true, patientId: patient.id }
+      });
+
+      return NextResponse.json({
+        success: true,
+        message: `Agendamento interno confirmado para ${slot.startTime.toLocaleString('pt-BR')}. ✅`
+      });
+    }
 
   } catch (error: any) {
-    console.error("[Booking Error]", error);
-    return NextResponse.json(
-      { error: error.message || 'Erro ao realizar agendamento' }, 
-      { status: 400 }
-    );
+    console.error("Booking Error:", error);
+    return NextResponse.json({ error: error.message || 'Erro ao realizar agendamento' }, { status: 400 });
   }
 }
