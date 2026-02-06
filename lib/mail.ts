@@ -52,3 +52,31 @@ export async function sendSubscriptionSuccessEmail(email: string, name: string, 
     console.error("❌ Erro ao enviar email de assinatura:", error);
   }
 }
+
+export async function sendPasswordResetToken(email: string, token: string) {
+  try {
+    // Template simples de HTML para o código
+    const html = `
+      <div style="font-family: sans-serif; text-align: center; color: #333;">
+        <h1>Recuperação de Senha</h1>
+        <p>Você solicitou a redefinição de senha para sua conta no Encaixe Já.</p>
+        <p>Seu código de verificação é:</p>
+        <div style="background: #f4f4f5; padding: 20px; border-radius: 10px; display: inline-block; margin: 20px 0;">
+          <span style="font-size: 32px; letter-spacing: 5px; font-weight: bold; color: #000;">${token}</span>
+        </div>
+        <p>Este código expira em 15 minutos.</p>
+        <p style="font-size: 12px; color: #666;">Se você não solicitou isso, ignore este e-mail.</p>
+      </div>
+    `;
+
+    await transporter.sendMail({
+      from: process.env.EMAIL_FROM,
+      to: email,
+      subject: `Seu código de recuperação: ${token}`,
+      html: html,
+    });
+    console.log(`🔑 Código de reset enviado para ${email}`);
+  } catch (error) {
+    console.error("❌ Erro ao enviar email de reset:", error);
+  }
+}

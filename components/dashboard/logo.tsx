@@ -1,15 +1,18 @@
 "use client";
 
-import { Box, Layers } from "lucide-react"; // Ícones que remetem a encaixe/camadas
+import { Layers } from "lucide-react"; // Ícones que remetem a encaixe/camadas
 import { motion, AnimatePresence } from "framer-motion";
+import { cn } from "@/lib/utils";
 
 interface LogoProps {
   isCollapsed: boolean;
+  className?: string; // <--- ADICIONADO: Para evitar erro de TypeScript no layout
 }
 
-export function Logo({ isCollapsed }: LogoProps) {
+export function Logo({ isCollapsed, className }: LogoProps) {
   return (
-    <div className="flex items-center gap-3 overflow-hidden py-2">
+    <div className={cn("flex items-center gap-3 overflow-hidden py-2", className)}>
+      
       {/* Ícone da Marca (Gradiente Dourado) */}
       <div className="relative flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-amber-300 via-yellow-500 to-amber-600 shadow-lg shadow-amber-500/20 transition-all duration-300 hover:scale-105 hover:shadow-amber-500/40">
         <Layers className="h-6 w-6 text-white" />

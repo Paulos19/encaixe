@@ -3,7 +3,7 @@ import { prisma } from '@/lib/prisma';
 import { z } from 'zod';
 
 const UpdateSchema = z.object({
-  userId: z.string().cuid(), // Quem está pedindo (segurança)
+  userId: z.string().cuid(),
   patientId: z.string().cuid(),
   data: z.object({
     name: z.string().optional(),
@@ -11,6 +11,8 @@ const UpdateSchema = z.object({
     email: z.string().email().optional().or(z.literal('')),
     insurance: z.string().optional(),
     notes: z.string().optional(),
+    // NOVO: Coerção de data na edição também
+    birthDate: z.coerce.date().optional(),
   })
 });
 
@@ -22,25 +24,26 @@ export async function POST(req: Request) {
     const body = await req.json();
     const { userId, patientId, data } = UpdateSchema.parse(body);
 
-    // Verifica se o paciente pertence ao médico antes de editar
-    const existingPatient = await prisma.patient.findUnique({
-      where: { id: patientId, managerId: userId }
+    const patient = await prisma.patient.findUnique({
+      where: { id: patientId }
     });
 
-    if (!existingPatient) {
+    if (!patient || patient.managerId !== userId) {
       return NextResponse.json({ error: 'Paciente não encontrado ou acesso negado' }, { status: 404 });
     }
 
-    const updated = await prisma.patient.update({
+    const updatedPatient = await prisma.patient.update({
       where: { id: patientId },
       data: {
-        ...data, // Atualiza apenas os campos enviados
+        ...data,
+        // Remove campos undefined para não sobrescrever com null se não forem enviados
+        birthDate: data.birthDate === undefined ? undefined : data.birthDate,
       }
     });
 
-    return NextResponse.json({ success: true, patient: updated });
-  } catch (error) {
-    console.error(error);
-    return NextResponse.json({ error: 'Erro ao atualizar paciente' }, { status: 400 });
+    return NextResponse.json({ success: true, patient: updatedPatient });
+
+  } catch (error: any) {
+    return NextResponse.json({ error: error.message || 'Erro ao atualizar paciente' }, { status: 400 });
   }
 }

@@ -3,12 +3,14 @@ import { prisma } from '@/lib/prisma';
 import { z } from 'zod';
 
 const CreateSchema = z.object({
-  userId: z.string().cuid(), // O Médico/Manager
+  userId: z.string().cuid(),
   name: z.string().min(1, "Nome é obrigatório"),
   phone: z.string().min(1, "Telefone é obrigatório"),
   email: z.string().email().optional().or(z.literal('')),
   insurance: z.string().optional(),
   notes: z.string().optional(),
+  // NOVO: Aceita string e converte para Date. Opcional.
+  birthDate: z.coerce.date().optional(), 
 });
 
 export async function POST(req: Request) {
@@ -19,7 +21,7 @@ export async function POST(req: Request) {
     const body = await req.json();
     const data = CreateSchema.parse(body);
 
-    // Verifica se já existe paciente com esse telefone para este médico
+    // Verifica duplicidade
     const existing = await prisma.patient.findUnique({
       where: {
         managerId_phone: {
@@ -44,6 +46,7 @@ export async function POST(req: Request) {
         email: data.email,
         insurance: data.insurance,
         notes: data.notes,
+        birthDate: data.birthDate, // Adicionado
       }
     });
 
