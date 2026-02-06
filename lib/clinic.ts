@@ -2,13 +2,15 @@ import axios from 'axios';
 import { format, addDays, addMinutes } from 'date-fns';
 
 // --- CONFIGURAÇÃO ---
+// URLs e Credenciais
 const BASE_URL = process.env.CLINIC_API_URL || process.env.LEGACY_URL;
 const CLIENT_ID = process.env.CLINIC_CLIENT_ID || process.env.LEGACY_CLIENT_ID;
 const CLIENT_SECRET = process.env.CLINIC_CLIENT_SECRET || process.env.LEGACY_CLIENT_SECRET;
 
-const FACILITY_ID = 1;
-const DOCTOR_ID = 10073; 
-const ADDRESS_ID = 1;
+// IDs de Contexto (Com Fallback para os valores padrão se não estiverem no .env)
+const FACILITY_ID = process.env.CLINIC_FACILITY_ID || '1';
+const DOCTOR_ID = process.env.CLINIC_DOCTOR_ID || '10073';
+const ADDRESS_ID = process.env.CLINIC_ADDRESS_ID || '1';
 
 // --- INTERFACES ---
 interface CrmToken {
@@ -16,7 +18,7 @@ interface CrmToken {
   expiresAt: number;
 }
 
-// Cache Global para evitar re-autenticação a cada request
+// Cache Global para evitar re-autenticação a cada request (Serverless friendly)
 declare global {
   var clinicTokenCache: CrmToken | null;
 }
@@ -31,15 +33,14 @@ class ClinicService {
   private async getAccessToken(): Promise<string> {
     if (!BASE_URL || !CLIENT_ID || !CLIENT_SECRET) {
       console.error("❌ ERRO CRÍTICO: Credenciais CLINIC_* ausentes no .env");
-      throw new Error("Credenciais do Clinic (CLINIC_*) não configuradas no .env");
+      throw new Error("Credenciais do Clinic não configuradas.");
     }
 
+    // Verifica se tem token válido no cache
     if (cachedToken && Date.now() < cachedToken.expiresAt) {
-      // console.log("🔄 Usando Token CRM em Cache");
       return cachedToken.accessToken;
     }
 
-    console.log("🔐 Autenticando com API Clinic...");
     const tokenUrl = `${BASE_URL}/oauth/v1/token`;
     const credentials = Buffer.from(`${CLIENT_ID}:${CLIENT_SECRET}`).toString('base64');
 
@@ -53,16 +54,14 @@ class ClinicService {
 
       const { access_token, expires_in } = response.data;
       
-      console.log("✅ Autenticado com Sucesso!");
-
       cachedToken = {
         accessToken: access_token,
         expiresAt: Date.now() + (expires_in - 60) * 1000,
       };
       
       global.clinicTokenCache = cachedToken;
-
       return access_token;
+
     } catch (error: any) {
       console.error("❌ Erro Auth Clinic:", error.response?.data || error.message);
       throw new Error("Falha na autenticação com o CRM.");
@@ -85,6 +84,7 @@ class ClinicService {
 
       const items = response.data.result?.items || [];
       
+      // Filtra apenas ativos e ordena alfabeticamente
       return items
         .filter((item: any) => item.status === true)
         .sort((a: any, b: any) => a.name.localeCompare(b.name))
@@ -104,7 +104,7 @@ class ClinicService {
    */
   public async getAvailableSlots(startDate: Date, days: number = 7) {
     if (!BASE_URL) {
-      console.warn("⚠️ AVISO: CLINIC_API_URL não definida. Retornando vazio.");
+      console.warn("⚠️ AVISO: CLINIC_API_URL não definida. Retornando array vazio.");
       return [];
     }
 
@@ -114,9 +114,10 @@ class ClinicService {
       const startStr = format(startDate, "yyyy-MM-dd");
       const endStr = format(addDays(startDate, days), "yyyy-MM-dd");
 
-      console.log(`🔎 [ClinicService] Consultando Slots de ${startStr} a ${endStr}...`);
-
       const url = `${BASE_URL}/api/v1/integration/facilities/${FACILITY_ID}/doctors/${DOCTOR_ID}/addresses/${ADDRESS_ID}/available-slots`;
+
+      // LOG DE DEBUG: Mostra a URL exata para verificação manual
+      console.log(`📡 GET Clinic Slots: ${url}?start_date=${startStr}&end_date=${endStr}`);
 
       const response = await axios.get(url, {
         headers: { 'Authorization': `Bearer ${token}` },
@@ -124,27 +125,28 @@ class ClinicService {
       });
 
       const rawItems = response.data.result?.items || [];
-      
-      console.log(`📊 [ClinicService] Retornou ${rawItems.length} slots livres.`);
+      console.log(`✅ Clinic retornou ${rawItems.length} slots livres.`);
 
-      // Mapeamento correto
+      // Mapeamento
       return rawItems.map((isoString: string) => {
         const startTime = new Date(isoString);
-        const endTime = addMinutes(startTime, 30); // Duração padrão se API não informar
+        // Assume duração de 30min se a API não fornecer
+        const endTime = addMinutes(startTime, 30); 
 
         return {
-          id: `clinic-free-${isoString}`, // ID Único
+          id: `clinic-free-${isoString}`, // ID Único para identificar a origem
           startTime: startTime,
           endTime: endTime,
           isBooked: false,
-          source: 'CLINIC',
+          source: 'CLINIC' as const,
           details: 'Disponível no ERP'
         };
       });
 
     } catch (error: any) {
       console.error("❌ Erro Clinic Available:", error.response?.data || error.message);
-      throw new Error(`Erro ao consultar API da clínica: ${error.message}`);
+      // Lança erro para que a Silvia saiba que houve falha técnica
+      throw new Error(`Erro API Clínica: ${error.message}`);
     }
   }
 
@@ -170,10 +172,11 @@ class ClinicService {
 
       return items.map((booking: any) => ({
         id: `clinic-booked-${booking.id}`,
+        // Tratamento robusto para data/hora
         startTime: booking.start ? new Date(booking.start) : new Date(`${booking.date}T${booking.start_time}`),
         endTime: booking.end ? new Date(booking.end) : new Date(`${booking.date}T${booking.end_time}`),
         isBooked: true,
-        source: 'CLINIC',
+        source: 'CLINIC' as const,
         details: booking.client || booking.patient?.name || "Paciente Agendado"
       }));
 
@@ -184,8 +187,7 @@ class ClinicService {
   }
 
   /**
-   * NOVO: Cria um agendamento na API externa
-   * Usado pela Silvia para confirmar marcação
+   * Cria um agendamento na API externa
    */
   public async createBooking(date: Date, patient: { name: string; phone: string; birthDate?: Date | null }) {
     if (!BASE_URL) throw new Error("URL da API não configurada.");
@@ -211,7 +213,7 @@ class ClinicService {
         }
       };
 
-      console.log(`📝 [ClinicService] Enviando Agendamento: ${payload.start_date} - ${patient.name}`);
+      console.log(`📝 POST Booking: ${url}`, payload);
 
       const response = await axios.post(url, payload, {
         headers: { 
@@ -220,7 +222,7 @@ class ClinicService {
         },
       });
 
-      console.log(`✅ [ClinicService] Agendamento Confirmado! ID: ${response.data.id}`);
+      console.log(`✅ Agendamento Confirmado! ID Externo: ${response.data.id}`);
 
       return {
         success: true,
@@ -230,19 +232,15 @@ class ClinicService {
 
     } catch (error: any) {
       console.error("❌ Erro Create Booking:", error.response?.data || error.message);
-      
-      // Captura mensagem de erro específica da API para repassar ao usuário
-      const apiMessage = error.response?.data?.message;
-      const finalMessage = apiMessage ? `A clínica recusou o agendamento: ${apiMessage}` : "Erro de conexão com a agenda da clínica.";
-      
-      throw new Error(finalMessage);
+      // Repassa o erro detalhado da API para o frontend/Silvia
+      throw new Error(error.response?.data?.message || "Erro ao conectar com a agenda da clínica.");
     }
   }
 }
 
 // --- EXPORTS ---
 
-// 1. Instância principal (singleton) para usar métodos da classe
+// 1. Instância principal (singleton)
 export const clinicService = new ClinicService();
 
 // 2. Funções soltas (Wrappers) para compatibilidade com códigos legados
