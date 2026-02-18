@@ -1,88 +1,105 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { clinicService } from '@/lib/clinic'; // Importar o serviço novo
+import { clinicService } from '@/lib/clinic'; // Integração Clinic
+import { z } from 'zod';
+
+// Schema flexível: aceita userId (do N8N) ou managerId (do Frontend)
+const CreateSchema = z.object({
+  userId: z.string().cuid().optional(),
+  managerId: z.string().cuid().optional(),
+  name: z.string().min(1, "Nome é obrigatório"),
+  phone: z.string().min(1, "Telefone é obrigatório"),
+  email: z.string().optional().or(z.literal('')),
+  insurance: z.string().optional(),
+  notes: z.string().optional(),
+  cpf: z.string().optional(),
+  birthDate: z.coerce.date().optional(), 
+}).refine(data => data.userId || data.managerId, {
+  message: "userId ou managerId é obrigatório",
+  path: ["userId"]
+});
 
 export async function POST(req: Request) {
+  // 1. Segurança
+  const apiKey = req.headers.get('x-api-key');
+  if (apiKey !== process.env.N8N_API_KEY) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
   try {
-    // 1. Validação de Segurança (API Key do N8N)
-    const apiKey = req.headers.get('x-api-key');
-    if (apiKey !== process.env.N8N_API_KEY) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
     const body = await req.json();
-    const { name, phone, managerId, cpf, birthDate } = body;
+    
+    // 2. Validação (Resolve o erro "Missing fields")
+    const data = CreateSchema.parse(body);
+    const managerId = data.userId || data.managerId!; // Garante que temos um ID
 
-    if (!name || !phone || !managerId) {
-      return NextResponse.json({ error: 'Missing fields' }, { status: 400 });
-    }
-
-    // 2. Verificar se o Manager é "Clinic" (Plano PLUS)
+    // 3. Verificar Plano para Integração Clinic
     const manager = await prisma.user.findUnique({
       where: { id: managerId },
       select: { plan: true }
     });
 
     let externalId = null;
-    let clinicData = null;
 
-    // 3. Se for Clinic, criar lá também (Integração Híbrida)
+    // 4. Integração Híbrida (Se for PLUS, salva na Clinic)
     if (manager?.plan === 'PLUS') {
       try {
-        console.log(`🏥 [Clinic] Criando paciente ${name} no sistema legado...`);
+        console.log(`🏥 [Clinic] Criando paciente ${data.name}...`);
         const clinicResult = await clinicService.upsertPatient({
-          name,
-          mobile: phone,
-          nin: cpf || "", // CPF é opcional no chat, mas necessário na Clinic
-          birthday: birthDate, // YYYY-MM-DD
-          sex: "M", // Default, a Silvia pode perguntar depois
-          email: ""
+          name: data.name,
+          mobile: data.phone,
+          nin: data.cpf || "",
+          birthday: data.birthDate ? data.birthDate.toISOString().split('T')[0] : undefined,
+          sex: "M", // Default
+          email: data.email || ""
         });
         
         if (clinicResult?.id) {
           externalId = clinicResult.id.toString();
-          clinicData = clinicResult;
           console.log(`✅ [Clinic] Sucesso! ID Externo: ${externalId}`);
         }
-      } catch (err) {
-        console.error("⚠️ [Clinic] Falha ao criar no legado (continuando local):", err);
-        // Não bloqueamos a criação local se a integração falhar, mas logamos
+      } catch (err: any) {
+        console.error("⚠️ [Clinic] Falha ao criar no legado:", err.message);
+        // Não bloqueia a criação local, apenas loga
       }
     }
 
-    // 4. Criar ou Atualizar no Banco Local (Prisma)
-    // O 'upsert' garante que não duplicamos se já existir pelo telefone/manager
+    // 5. Salvar no Banco Local (Prisma)
     const patient = await prisma.patient.upsert({
       where: {
         managerId_phone: {
           managerId,
-          phone,
+          phone: data.phone,
         },
       },
       update: {
-        name,
-        // Se conseguimos ID externo, salvamos nos metadados ou notes (se não tiver campo específico)
-        notes: externalId ? `Clinic ID: ${externalId}` : undefined
+        name: data.name,
+        email: data.email || undefined,
+        birthDate: data.birthDate || undefined,
+        insurance: data.insurance || undefined,
+        notes: externalId ? `Clinic ID: ${externalId}` : data.notes,
       },
       create: {
-        name,
-        phone,
         managerId,
-        notes: externalId ? `Clinic ID: ${externalId}` : undefined
+        name: data.name,
+        phone: data.phone,
+        email: data.email,
+        birthDate: data.birthDate,
+        insurance: data.insurance,
+        notes: externalId ? `Clinic ID: ${externalId}` : data.notes,
       },
     });
 
     return NextResponse.json({ 
       success: true, 
       patient,
-      clinicId: externalId, // Retorna para o N8N saber
-      message: externalId 
-        ? "Paciente criado localmente e na Clínica." 
-        : "Paciente criado apenas localmente."
+      clinicId: externalId
     });
 
   } catch (error: any) {
-    console.error('Erro ao criar paciente:', error);
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    console.error("Erro Create Patient:", error);
+    // Retorna erro amigável se for do Zod, senão o erro genérico
+    const msg = error.issues ? error.issues[0].message : (error.message || 'Erro ao criar paciente');
+    return NextResponse.json({ error: msg }, { status: 400 });
   }
 }
