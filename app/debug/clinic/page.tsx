@@ -78,7 +78,7 @@ export default async function ClinicDebugPage({ searchParams }: Props) {
       {status.connection === "error" && (
         <Alert variant="destructive">
           <XCircle className="h-4 w-4" />
-          <AlertTitle>Erro de Conexão</AlertTitle>
+          <AlertTitle>Erro de Conexões</AlertTitle>
           <AlertDescription>{status.message}</AlertDescription>
         </Alert>
       )}
