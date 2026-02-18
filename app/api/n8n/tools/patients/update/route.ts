@@ -5,7 +5,7 @@ import { z } from 'zod';
 
 const UpdateSchema = z.object({
   userId: z.string().cuid().optional(),
-  managerId: z.string().cuid().optional(), // Suporte híbrido
+  managerId: z.string().cuid().optional(),
   patientId: z.string().cuid(),
   data: z.object({
     name: z.string().optional(),
@@ -14,7 +14,16 @@ const UpdateSchema = z.object({
     insurance: z.string().optional(),
     notes: z.string().optional(),
     birthDate: z.coerce.date().optional(),
-    cpf: z.string().optional(), // Adicionado campo CPF
+    // Novos campos mapeados
+    cpf: z.string().optional(),
+    sex: z.string().optional(),
+    address: z.string().optional(),
+    addressNumber: z.string().optional(),
+    zipCode: z.string().optional(),
+    neighborhood: z.string().optional(),
+    city: z.string().optional(),
+    state: z.string().optional(),
+    rg: z.string().optional(),
   }),
 }).refine(data => data.userId || data.managerId, {
   message: "userId ou managerId é obrigatório",
@@ -28,46 +37,9 @@ export async function POST(req: Request) {
   try {
     const body = await req.json();
     const { userId, managerId, patientId, data } = UpdateSchema.parse(body);
-    
-    // Normalização do ID do gestor
     const ownerId = userId || managerId!;
 
-    // 1. Buscar paciente atual
-    const existingPatient = await prisma.patient.findUnique({
-      where: { id: patientId },
-    });
-
-    if (!existingPatient) return NextResponse.json({ error: 'Patient not found' }, { status: 404 });
-
-    // 2. Verificar Plano para Integração Clinic
-    const manager = await prisma.user.findUnique({
-      where: { id: ownerId },
-      select: { plan: true }
-    });
-
-    // 3. Integração Clinic (Se for PLUS)
-    if (manager?.plan === 'PLUS') {
-      try {
-        console.log(`🏥 [Clinic] Atualizando paciente ${data.name || existingPatient.name}...`);
-        
-        // Mescla dados novos com antigos para garantir integridade no envio
-        await clinicService.upsertPatient({
-          name: data.name || existingPatient.name,
-          mobile: data.phone || existingPatient.phone,
-          nin: data.cpf || "", // Envia CPF se vier na edição
-          birthday: data.birthDate 
-            ? data.birthDate.toISOString().split('T')[0] 
-            : (existingPatient.birthDate ? existingPatient.birthDate.toISOString().split('T')[0] : undefined),
-          sex: "M", 
-          email: data.email || existingPatient.email || ""
-        });
-        console.log("✅ [Clinic] Paciente atualizado no legado.");
-      } catch (err: any) {
-        console.error("⚠️ [Clinic] Falha ao atualizar:", err.message);
-      }
-    }
-
-    // 4. Atualizar Localmente
+    // 1. Atualizar Localmente PRIMEIRO (Para garantir que temos os dados salvos)
     const updatedPatient = await prisma.patient.update({
       where: { id: patientId },
       data: {
@@ -77,10 +49,49 @@ export async function POST(req: Request) {
         insurance: data.insurance,
         notes: data.notes,
         birthDate: data.birthDate,
-        // Nota: Não temos campo CPF no prisma schema fornecido, então não salvamos localmente
-        // a menos que você adicione ao schema.prisma. Mas enviamos para a Clinic acima.
+        // Novos campos salvos no banco
+        cpf: data.cpf,
+        sex: data.sex,
+        address: data.address,
+        addressNumber: data.addressNumber,
+        zipCode: data.zipCode,
+        neighborhood: data.neighborhood,
+        city: data.city,
+        state: data.state,
+        rg: data.rg
       },
     });
+
+    // 2. Verificar Integração Clinic
+    const manager = await prisma.user.findUnique({
+      where: { id: ownerId },
+      select: { plan: true }
+    });
+
+    if (manager?.plan === 'PLUS') {
+      try {
+        console.log(`🏥 [Clinic] Sincronizando dados completos de ${updatedPatient.name}...`);
+        
+        // Agora usamos os dados JÁ SALVOS no banco (updatedPatient) para garantir integridade
+        // Se o dado não veio no request, pega o que já estava no banco
+        await clinicService.upsertPatient({
+          name: updatedPatient.name,
+          mobile: updatedPatient.phone,
+          email: updatedPatient.email || "",
+          // Campos Clinic Full
+          nin: updatedPatient.cpf || "",
+          sex: (updatedPatient.sex as "M" | "F") || "M",
+          address: updatedPatient.address || "",
+          addressNumber: updatedPatient.addressNumber || "",
+          zipCode: updatedPatient.zipCode || "",
+          birthday: updatedPatient.birthDate ? updatedPatient.birthDate.toISOString().split('T')[0] : undefined,
+          // Se precisar adicionar neighborhood/city/state ao serviço, ajuste o lib/clinic.ts
+        });
+        console.log("✅ [Clinic] Sincronização completa.");
+      } catch (err: any) {
+        console.error("⚠️ [Clinic] Erro na sincronização:", err.message);
+      }
+    }
 
     return NextResponse.json({ success: true, patient: updatedPatient });
 

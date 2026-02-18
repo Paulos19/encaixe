@@ -66,15 +66,26 @@ model Patient {
   phone     String
   email     String?
   notes     String?
-
   birthDate DateTime?
-  insurance String? // Convênio
+  insurance String? 
+
+  // --- NOVOS CAMPOS PARA INTEGRAÇÃO CLINIC ---
+  cpf           String?   // Para mapear o "nin"
+  sex           String?   // "M" ou "F"
+  rg            String?
+  address       String?
+  addressNumber String?
+  neighborhood  String?
+  city          String?
+  state         String?   // "PR", "SP", etc.
+  zipCode       String?
+  // -------------------------------------------
 
   managerId String
   manager   User    @relation(fields: [managerId], references: [id])
 
   entries      WaitlistEntry[]
-  appointments AgendaSlot[]    // <--- RELAÇÃO NOVA: Histórico de agendamentos
+  appointments AgendaSlot[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
