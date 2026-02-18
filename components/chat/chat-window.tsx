@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { Send, Menu, Plus, Sparkles, Eraser, ChevronDown, Bot, FileSpreadsheet, Loader2, Zap, Paperclip } from 'lucide-react';
+import { Send, Menu, Plus, Sparkles, Eraser, ChevronDown, Bot, FileSpreadsheet, Loader2, Zap } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Sheet, SheetContent, SheetTrigger, SheetTitle } from "@/components/ui/sheet";
