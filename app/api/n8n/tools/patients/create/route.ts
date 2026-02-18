@@ -1,106 +1,99 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { clinicService } from '@/lib/clinic'; // Integração Clinic
+import { clinicService } from '@/lib/clinic';
 import { z } from 'zod';
 
-// Schema Inteligente: Aceita userId OU managerId
+// Schema Flexível e Robusto
 const CreateSchema = z.object({
-  userId: z.string().cuid().optional(),
-  managerId: z.string().cuid().optional(),
+  userId: z.string().optional(), // Aceita vir vazio do N8N
+  managerId: z.string().optional(),
   name: z.string().min(1, "Nome é obrigatório"),
   phone: z.string().min(1, "Telefone é obrigatório"),
-  email: z.string().optional().or(z.literal('')),
+  email: z.string().optional(),
   insurance: z.string().optional(),
   notes: z.string().optional(),
+  
+  // Novos Campos (Opcionais na criação, mas a Silvia vai tentar preencher)
   cpf: z.string().optional(),
-  birthDate: z.coerce.date().optional(), 
-}).refine(data => data.userId || data.managerId, {
-  message: "É necessário enviar userId ou managerId",
-  path: ["userId"]
+  birthDate: z.coerce.date().optional(), // Aceita string "1990-05-10" e vira Date
+  sex: z.string().optional(),
+  address: z.string().optional(),
+  zipCode: z.string().optional(),
 });
 
 export async function POST(req: Request) {
-  // 1. Segurança
   const apiKey = req.headers.get('x-api-key');
-  if (apiKey !== process.env.N8N_API_KEY) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  }
+  if (apiKey !== process.env.N8N_API_KEY) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   try {
     const body = await req.json();
-    
-    // 2. Validação e Normalização
-    const data = CreateSchema.parse(body);
-    // Usa userId se vier (N8N), senão usa managerId
-    const managerId = data.userId || data.managerId!; 
+    console.log("📝 Create Patient Body:", JSON.stringify(body)); // Log para debug
 
-    // 3. Verificar Plano para Integração Clinic
+    const data = CreateSchema.parse(body);
+    
+    // Garante que temos um ID de dono (userId do N8N ou managerId do Front)
+    const ownerId = data.userId || data.managerId;
+    if (!ownerId) {
+        return NextResponse.json({ error: "ID do usuário (userId) não identificado." }, { status: 400 });
+    }
+
+    // 1. Verifica Duplicidade Local
+    const existing = await prisma.patient.findUnique({
+      where: { managerId_phone: { managerId: ownerId, phone: data.phone } }
+    });
+
+    if (existing) {
+        return NextResponse.json({ error: "Paciente já existe com este telefone.", patientId: existing.id }, { status: 409 });
+    }
+
+    // 2. Verificar Integração Clinic (Plano PLUS)
     const manager = await prisma.user.findUnique({
-      where: { id: managerId },
+      where: { id: ownerId },
       select: { plan: true }
     });
 
     let externalId = null;
 
-    // 4. Integração Híbrida (Se for PLUS, salva na Clinic)
     if (manager?.plan === 'PLUS') {
       try {
-        console.log(`🏥 [Clinic] Criando paciente ${data.name}...`);
+        console.log(`🏥 [Clinic] Criando...`);
         const clinicResult = await clinicService.upsertPatient({
           name: data.name,
           mobile: data.phone,
-          nin: data.cpf || "",
+          nin: data.cpf || "", // Envia CPF se tiver
           birthday: data.birthDate ? data.birthDate.toISOString().split('T')[0] : undefined,
-          sex: "M", // Default
-          email: data.email || ""
+          sex: (data.sex as "M"|"F") || "M",
+          email: data.email || "",
+          address: data.address || "",
+          zipCode: data.zipCode || ""
         });
-        
-        if (clinicResult?.id) {
-          externalId = clinicResult.id.toString();
-          console.log(`✅ [Clinic] Sucesso! ID Externo: ${externalId}`);
-        }
+        if (clinicResult?.id) externalId = clinicResult.id.toString();
       } catch (err: any) {
-        console.error("⚠️ [Clinic] Falha ao criar no legado:", err.message);
-        // Não bloqueia a criação local, apenas loga
+        console.error("⚠️ [Clinic] Erro (não bloqueante):", err.message);
       }
     }
 
-    // 5. Salvar no Banco Local (Prisma)
-    const patient = await prisma.patient.upsert({
-      where: {
-        managerId_phone: {
-          managerId,
-          phone: data.phone,
-        },
-      },
-      update: {
-        name: data.name,
-        email: data.email || undefined,
-        birthDate: data.birthDate || undefined,
-        insurance: data.insurance || undefined,
-        notes: externalId ? `Clinic ID: ${externalId}` : data.notes,
-      },
-      create: {
-        managerId,
+    // 3. Salvar no Banco Local
+    const newPatient = await prisma.patient.create({
+      data: {
+        managerId: ownerId,
         name: data.name,
         phone: data.phone,
         email: data.email,
-        birthDate: data.birthDate,
         insurance: data.insurance,
         notes: externalId ? `Clinic ID: ${externalId}` : data.notes,
-      },
+        birthDate: data.birthDate,
+        cpf: data.cpf,
+        sex: data.sex,
+        address: data.address,
+        zipCode: data.zipCode
+      }
     });
 
-    return NextResponse.json({ 
-      success: true, 
-      patient,
-      clinicId: externalId
-    });
+    return NextResponse.json({ success: true, patient: newPatient, clinicId: externalId });
 
   } catch (error: any) {
-    console.error("Erro Create Patient:", error);
-    // Retorna erro amigável se for do Zod
-    const msg = error.issues ? error.issues[0].message : (error.message || 'Erro ao criar paciente');
-    return NextResponse.json({ error: msg }, { status: 400 });
+    console.error("❌ Erro Create:", error);
+    return NextResponse.json({ error: error.message || 'Erro ao processar.' }, { status: 400 });
   }
 }
