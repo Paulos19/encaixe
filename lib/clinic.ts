@@ -3,12 +3,14 @@ import { format, addDays, addMinutes } from 'date-fns';
 
 // --- HELPERS ---
 const cleanUrl = (url?: string) => url?.replace(/\/$/, '') || '';
-
-// Remove caracteres não numéricos (Retorna apenas dígitos)
 const onlyNumbers = (str: string) => str.replace(/\D/g, '');
 
-// Remove o DDI (55) se existir, mantendo apenas DDD + Número (11 dígitos)
-// Isso ajuda a evitar Overflow se o banco usar campos numéricos limitados
+const formatCPF = (cpf: string) => {
+  const nums = onlyNumbers(cpf);
+  if (nums.length !== 11) return nums;
+  return nums.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, '$1.$2.$3-$4');
+};
+
 const formatMobileLegacy = (phone: string) => {
   let nums = onlyNumbers(phone);
   if (nums.startsWith('55') && nums.length >= 12) {
@@ -22,12 +24,13 @@ const BASE_URL = cleanUrl(process.env.CLINIC_API_URL || process.env.LEGACY_URL);
 const CLIENT_ID = process.env.CLINIC_CLIENT_ID || process.env.LEGACY_CLIENT_ID;
 const CLIENT_SECRET = process.env.CLINIC_CLIENT_SECRET || process.env.LEGACY_CLIENT_SECRET;
 
-// IDs de Contexto
 const FACILITY_ID = process.env.CLINIC_FACILITY_ID || '1';
 const DOCTOR_ID = process.env.CLINIC_DOCTOR_ID || '10073';
 const ADDRESS_ID = process.env.CLINIC_ADDRESS_ID || '1';
 
-// --- INTERFACES ---
+// CBO Padrão (Psiquiatria = 225133, Clínico = 225170)
+const SPECIALTY_CBO = process.env.CLINIC_SPECIALTY_CBO || '225133'; 
+
 interface CrmToken {
   accessToken: string;
   expiresAt: number;
@@ -36,17 +39,16 @@ interface CrmToken {
 export interface ClinicPatientData {
   name: string;
   mobile: string;
-  birthday?: string; // YYYY-MM-DD
+  birthday?: string;
   sex?: "M" | "F";
   email?: string;
-  nin?: string; // CPF
+  nin?: string;
   healthInsuranceCode?: number;
   address?: string;
   addressNumber?: string;
   zipCode?: string;
 }
 
-// Cache Global
 declare global {
   var clinicTokenCache: CrmToken | null;
 }
@@ -91,16 +93,62 @@ class ClinicService {
     }
   }
 
-  // --- MÉTODOS DE PACIENTE ---
+  // --- FERRAMENTAS DE DIAGNÓSTICO (NOVO) ---
+
+  /**
+   * Retorna detalhes da Unidade (Facility), incluindo lista de médicos e especialidades.
+   * Útil para descobrir o DOCTOR_ID correto e o SPECIALTY_CBO.
+   */
+  public async getFacilityDetails() {
+    if (!BASE_URL) return null;
+    try {
+        const token = await this.getAccessToken();
+        const url = `${BASE_URL}/api/v1/integration/facilities/${FACILITY_ID}`;
+        const response = await axios.get(url, { headers: { 'Authorization': `Bearer ${token}` } });
+        return response.data.result;
+    } catch (error: any) {
+        console.error("Erro Get Facility:", error.message);
+        throw error;
+    }
+  }
+
+  /**
+   * Tenta buscar slots pela ROTA DE ESPECIALIDADE (Documentada)
+   * Útil se a rota direta do médico falhar.
+   */
+  public async getSlotsBySpecialty(startDate: Date, days: number = 7) {
+    if (!BASE_URL) return [];
+    try {
+        const token = await this.getAccessToken();
+        const startStr = format(startDate, "yyyy-MM-dd");
+        const endStr = format(addDays(startDate, days), "yyyy-MM-dd");
+        
+        const params = new URLSearchParams({
+            start_date: startStr,
+            end_date: endStr,
+            specialty_cbo: SPECIALTY_CBO, // Necessário configurar no .env
+            health_insurance_id: "4" // Padrão 'Particular' ou similar
+        });
+
+        const url = `${BASE_URL}/api/v1/integration/facilities/${FACILITY_ID}/available-slots-by-specialty?${params.toString()}`;
+        console.log(`🔎 Testing Specialty Slots: ${url}`);
+
+        const response = await axios.get(url, { headers: { 'Authorization': `Bearer ${token}` } });
+        return response.data.result;
+    } catch (error: any) {
+        console.error("Erro Specialty Slots:", error.message);
+        return [];
+    }
+  }
+
+  // --- MÉTODOS ORIGINAIS ---
 
   public async upsertPatient(data: ClinicPatientData) {
     if (!BASE_URL) throw new Error("URL da API não configurada.");
-    
     try {
       const token = await this.getAccessToken();
       const url = `${BASE_URL}/api/v1/integration/facilities/${FACILITY_ID}/patients`;
 
-      // CORREÇÃO: Enviar NIN (CPF) sem formatação para passar na validação "required"
       const rawNin = data.nin ? onlyNumbers(data.nin) : ""; 
       const cleanMobile = formatMobileLegacy(data.mobile); 
 
@@ -110,7 +158,7 @@ class ClinicService {
         birthday: data.birthday,
         sex: data.sex || "M",
         email: data.email || "",
-        nin: rawNin, // SOMENTE NÚMEROS
+        nin: rawNin,
         maritalStatus: 3, 
         healthInsuranceCode: data.healthInsuranceCode || 2,
         address: data.address || "Rua",
@@ -119,70 +167,45 @@ class ClinicService {
         external_id: ""
       };
 
-      console.log(`👤 Upsert Patient Payload:`, JSON.stringify(payload, null, 2));
-
       const response = await axios.post(url, payload, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
-
       return response.data.result;
 
     } catch (error: any) {
-      const sqlError = error.response?.data?.error;
-      const validationError = error.response?.data?.errors;
-
-      if (validationError) {
-         console.error("❌ Erro Validação Clinic:", JSON.stringify(validationError, null, 2));
-         throw new Error(`Erro de Validação: ${JSON.stringify(validationError)}`);
-      }
-      
-      if (sqlError) {
-          console.error("❌ Erro SQL Server Clinic:", JSON.stringify(sqlError, null, 2));
-          if (sqlError.number === 8115) {
-             throw new Error("Erro de Overflow: O sistema da clínica recusou o tamanho do CPF ou Telefone.");
-          }
-      }
-      
-      console.error("❌ Erro Upsert Patient:", error.response?.data || error.message);
-      throw new Error(error.response?.data?.message || "Erro ao salvar paciente no CRM.");
+        const sqlError = error.response?.data?.error;
+        const validationError = error.response?.data?.errors;
+        if (validationError) throw new Error(`Erro de Validação: ${JSON.stringify(validationError)}`);
+        if (sqlError && sqlError.number === 8115) throw new Error("Erro de Overflow (CPF/Tel).");
+        throw new Error(error.response?.data?.message || "Erro ao salvar paciente.");
     }
   }
 
   public async findPatients(query: string) {
-    if (!BASE_URL) return [];
-    try {
-      const token = await this.getAccessToken();
-      const url = `${BASE_URL}/api/v1/integration/facilities/${FACILITY_ID}/patients`;
-      
-      // Busca apenas números se parecer CPF/Phone, senão texto livre
-      const searchTerm = /[0-9]{3}/.test(query) ? onlyNumbers(query) : query;
-
-      const response = await axios.get(url, {
-        headers: { 'Authorization': `Bearer ${token}` },
-        params: { search: searchTerm } 
-      });
-
-      return response.data.result?.items || [];
-    } catch (error: any) {
-      console.error("❌ Erro Find Patient:", error.response?.data || error.message);
-      return [];
-    }
+     if (!BASE_URL) return [];
+     try {
+       const token = await this.getAccessToken();
+       const url = `${BASE_URL}/api/v1/integration/facilities/${FACILITY_ID}/patients`;
+       const searchTerm = /[0-9]{3}/.test(query) ? onlyNumbers(query) : query;
+       const response = await axios.get(url, {
+         headers: { 'Authorization': `Bearer ${token}` },
+         params: { search: searchTerm } 
+       });
+       return response.data.result?.items || [];
+     } catch (error: any) {
+       console.error("Erro Find Patient:", error.message);
+       return [];
+     }
   }
 
-  // --- MÉTODOS DE AGENDA ---
-
   public async getHealthInsurances() {
-    if (!BASE_URL) return [];
-    try {
-      const token = await this.getAccessToken();
-      const url = `${BASE_URL}/api/v1/integration/insurance-providers`;
-      const response = await axios.get(url, { headers: { 'Authorization': `Bearer ${token}` } });
-      const items = response.data.result?.items || [];
-      return items.filter((item: any) => item.status === true).map((item: any) => ({ id: item.id, name: item.name }));
-    } catch (error: any) {
-      console.error("❌ Erro Insurances:", error.message);
-      return [];
-    }
+      if (!BASE_URL) return [];
+      try {
+        const token = await this.getAccessToken();
+        const url = `${BASE_URL}/api/v1/integration/insurance-providers`;
+        const response = await axios.get(url, { headers: { 'Authorization': `Bearer ${token}` } });
+        return response.data.result?.items?.filter((i:any) => i.status).map((i:any) => ({ id: i.id, name: i.name })) || [];
+      } catch (e) { return []; }
   }
 
   public async getAvailableSlots(startDate: Date, days: number = 7) {
@@ -191,9 +214,10 @@ class ClinicService {
       const token = await this.getAccessToken();
       const startStr = format(startDate, "yyyy-MM-dd");
       const endStr = format(addDays(startDate, days), "yyyy-MM-dd");
+      
       const url = `${BASE_URL}/api/v1/integration/facilities/${FACILITY_ID}/doctors/${DOCTOR_ID}/addresses/${ADDRESS_ID}/available-slots`;
 
-      console.log(`📡 GET Slots: ${startStr} a ${endStr}`);
+      console.log(`📡 GET Slots: ${url}?start_date=${startStr}&end_date=${endStr}`);
 
       const response = await axios.get(url, {
         headers: { 'Authorization': `Bearer ${token}` },
@@ -202,6 +226,10 @@ class ClinicService {
 
       const rawItems = response.data.result?.items || [];
       
+      if (rawItems.length === 0) {
+          console.warn(`⚠️ API retornou 0 slots. Verifique: ADDRESS_ID=${ADDRESS_ID}, DOCTOR_ID=${DOCTOR_ID} ou se a agenda de ${startStr} está aberta.`);
+      }
+
       return rawItems.map((isoString: string) => ({
         id: `clinic-free-${isoString}`, 
         startTime: new Date(isoString),
@@ -213,16 +241,18 @@ class ClinicService {
 
     } catch (error: any) {
       console.error(`❌ Erro Slots:`, error.message);
-      throw error;
+      return [];
     }
   }
 
   public async getBookings(startDate: Date, days: number = 7) {
     if (!BASE_URL) return [];
+
     try {
       const token = await this.getAccessToken();
       const startStr = format(startDate, "yyyy-MM-dd");
       const endStr = format(addDays(startDate, days), "yyyy-MM-dd");
+
       const url = `${BASE_URL}/api/v1/integration/facilities/${FACILITY_ID}/doctors/${DOCTOR_ID}/addresses/${ADDRESS_ID}/bookings`;
 
       const response = await axios.get(url, {
@@ -248,50 +278,32 @@ class ClinicService {
   }
 
   public async createBooking(date: Date, patient: { name: string; phone: string; birthDate?: Date | null }) {
-     if (!BASE_URL) throw new Error("URL da API não configurada.");
+      if (!BASE_URL) throw new Error("URL da API não configurada.");
+      try {
+        const token = await this.getAccessToken();
+        const endDate = addMinutes(date, 30);
+        const url = `${BASE_URL}/api/v1/integration/facilities/${FACILITY_ID}/doctors/${DOCTOR_ID}/addresses/${ADDRESS_ID}/bookings`;
 
-    try {
-      const token = await this.getAccessToken();
-      const endDate = addMinutes(date, 30);
-      const url = `${BASE_URL}/api/v1/integration/facilities/${FACILITY_ID}/doctors/${DOCTOR_ID}/addresses/${ADDRESS_ID}/bookings`;
-
-      const payload = {
-        start_date: format(date, "yyyy-MM-dd HH:mm:ss"),
-        end_date: format(endDate, "yyyy-MM-dd HH:mm:ss"),
-        note: "Agendado via Silvia (Encaixe Já)",
-        patient: {
-          name: patient.name,
-          mobile_phone: formatMobileLegacy(patient.phone),
-          birth_date: patient.birthDate ? format(patient.birthDate, "yyyy-MM-dd") : null
-        }
-      };
-
-      console.log(`📝 POST Booking: ${url}`, payload);
-
-      const response = await axios.post(url, payload, {
-        headers: { 
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
-      });
-
-      console.log(`✅ Agendamento Confirmado! ID: ${response.data.id}`);
-
-      return {
-        success: true,
-        bookingId: response.data.id || 'external-id',
-        time: date
-      };
-
-    } catch (error: any) {
-      console.error("❌ Erro Create Booking:", error.response?.data || error.message);
-      const apiMsg = error.response?.data?.message;
-      throw new Error(apiMsg ? `Clínica recusou: ${apiMsg}` : "Erro ao conectar com a agenda da clínica.");
-    }
+        const payload = {
+            start_date: format(date, "yyyy-MM-dd HH:mm:ss"),
+            end_date: format(endDate, "yyyy-MM-dd HH:mm:ss"),
+            note: "Agendado via Silvia (Encaixe Já)",
+            patient: {
+            name: patient.name,
+            mobile_phone: formatMobileLegacy(patient.phone),
+            birth_date: patient.birthDate ? format(patient.birthDate, "yyyy-MM-dd") : null
+            }
+        };
+        const response = await axios.post(url, payload, {
+            headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+        });
+        return { success: true, bookingId: response.data.id || 'external-id', time: date };
+      } catch (error: any) {
+        throw new Error(error.response?.data?.message || "Erro ao conectar com a agenda.");
+      }
   }
 }
 
 export const clinicService = new ClinicService();
-
 export const getClinicAvailableSlots = (startDate: Date, days: number = 7) => clinicService.getAvailableSlots(startDate, days);
 export const getClinicBookings = (startDate: Date, days: number = 7) => clinicService.getBookings(startDate, days);
