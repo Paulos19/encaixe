@@ -5,7 +5,7 @@ import { z } from 'zod';
 import { startOfDay, endOfDay, parseISO, addDays } from 'date-fns';
 
 const QuerySchema = z.object({
-  userId: z.string().cuid(), // Identificador do Manager (Dono da agenda)
+  userId: z.string().cuid(),
   date: z.string().optional(),
   days: z.coerce.number().optional().default(7),
 });
@@ -16,10 +16,8 @@ export async function GET(req: Request) {
 
   try {
     const { searchParams } = new URL(req.url);
-    
-    // Normaliza: N8N pode mandar userId ou managerId, ambos representam o ID do User
     const userIdInput = searchParams.get('userId') || searchParams.get('managerId');
-    if (!userIdInput) return NextResponse.json({ error: 'Missing userId/managerId' }, { status: 400 });
+    if (!userIdInput) return NextResponse.json({ error: 'Missing userId' }, { status: 400 });
 
     const params = QuerySchema.parse({
       userId: userIdInput,
@@ -30,44 +28,42 @@ export async function GET(req: Request) {
     // 1. Definição de Datas
     let startDate = params.date ? parseISO(params.date) : new Date();
     const currentYear = new Date().getFullYear();
-
-    if (startDate.getFullYear() < currentYear) {
-      startDate.setFullYear(currentYear);
-    }
-
+    // Correção: Se a IA enviar 2024 ou 2025, ajustamos para o ano atual
+    if (startDate.getFullYear() < currentYear) startDate.setFullYear(currentYear);
     const endDate = addDays(startDate, params.days);
     
-    console.log(`🤖 Silvia Consultando: ${startDate.toLocaleDateString('pt-BR')} até ${endDate.toLocaleDateString('pt-BR')}`);
+    // DIAGNÓSTICO: Verificar se usuário é PLUS
+    const user = await prisma.user.findUnique({ where: { id: params.userId }, select: { plan: true, name: true } });
+    const isPlus = user?.plan === 'PLUS';
+    
+    console.log(`🤖 Silvia Agenda | User: ${user?.name} | Plano: ${user?.plan} | Buscando: ${params.days} dias a partir de ${startDate.toLocaleDateString()}`);
 
     // 2. Busca Slots LOCAIS (Banco Prisma)
-    // CORREÇÃO AQUI: Usando 'userId' conforme seu schema.prisma
     const manualSlots = await prisma.agendaSlot.findMany({
       where: {
         userId: params.userId, 
         isBooked: false,
-        startTime: {
-          gte: startOfDay(startDate),
-          lte: endOfDay(endDate),
-        },
+        startTime: { gte: startOfDay(startDate), lte: endOfDay(endDate) },
       },
     });
 
-    // 3. Busca Slots CLINIC (API Externa)
-    const user = await prisma.user.findUnique({ where: { id: params.userId }, select: { plan: true } });
+    // 3. Busca Slots CLINIC (Se PLUS)
     let clinicSlots: any[] = [];
-    
-    if (user?.plan === 'PLUS') {
+    if (isPlus) {
         try {
+            // O serviço agora tenta rota direta E fallback por especialidade
             clinicSlots = await clinicService.getAvailableSlots(startDate, params.days);
         } catch (err) {
-            console.error("⚠️ Erro ao buscar Clinic slots (Ignorando):", err);
+            console.error("⚠️ Erro Clinic:", err);
         }
+    } else {
+        console.warn("🚫 Usuário não é PLUS. Pulando busca na Clínica.");
     }
 
-    // 4. MERGE e UNIFICAÇÃO
+    // 4. Merge
     const slotMap = new Map<string, any>();
 
-    // A. Popula com Manuais Locais
+    // A. Manuais
     manualSlots.forEach(slot => {
       const key = slot.startTime.toISOString();
       slotMap.set(key, {
@@ -79,11 +75,11 @@ export async function GET(req: Request) {
       });
     });
 
-    // B. Mescla com Clinic
+    // B. Clinic
     clinicSlots.forEach(slot => {
       const key = slot.startTime.toISOString();
+      // Garante ID único com prefixo para o POST
       const clinicSlotId = slot.id.startsWith('clinic-') ? slot.id : `clinic-${key}`;
-      
       slotMap.set(key, {
         slotId: clinicSlotId,
         startTime: slot.startTime,
@@ -97,6 +93,8 @@ export async function GET(req: Request) {
     const finalSlots = Array.from(slotMap.values())
       .sort((a, b) => a.startTime.getTime() - b.startTime.getTime())
       .map(({ startTime, ...rest }) => rest);
+
+    console.log(`📊 Total Slots Retornados: ${finalSlots.length}`);
 
     if (finalSlots.length === 0) {
       return NextResponse.json({ 
@@ -112,9 +110,7 @@ export async function GET(req: Request) {
     });
 
   } catch (error: any) {
-    console.error("❌ ERRO CRÍTICO NA ROTA SLOTS:", error.message);
-    return NextResponse.json({ 
-      error: error.message || "Erro desconhecido ao consultar agenda."
-    }, { status: 500 });
+    console.error("❌ ERRO API SLOTS:", error.message);
+    return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }

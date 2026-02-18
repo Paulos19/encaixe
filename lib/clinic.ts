@@ -28,7 +28,8 @@ const FACILITY_ID = process.env.CLINIC_FACILITY_ID || '1';
 const DOCTOR_ID = process.env.CLINIC_DOCTOR_ID || '10073';
 const ADDRESS_ID = process.env.CLINIC_ADDRESS_ID || '1';
 
-// CBO Padrão (Psiquiatria = 225133, Clínico = 225170)
+// CBO Padrão: 225133 (Psiquiatria) ou 225170 (Clínico). 
+// Se não definido, usa o de Psiquiatria como fallback.
 const SPECIALTY_CBO = process.env.CLINIC_SPECIALTY_CBO || '225133'; 
 
 interface CrmToken {
@@ -93,12 +94,8 @@ class ClinicService {
     }
   }
 
-  // --- FERRAMENTAS DE DIAGNÓSTICO (NOVO) ---
+  // --- FERRAMENTAS DE DIAGNÓSTICO ---
 
-  /**
-   * Retorna detalhes da Unidade (Facility), incluindo lista de médicos e especialidades.
-   * Útil para descobrir o DOCTOR_ID correto e o SPECIALTY_CBO.
-   */
   public async getFacilityDetails() {
     if (!BASE_URL) return null;
     try {
@@ -108,14 +105,10 @@ class ClinicService {
         return response.data.result;
     } catch (error: any) {
         console.error("Erro Get Facility:", error.message);
-        throw error;
+        return null;
     }
   }
 
-  /**
-   * Tenta buscar slots pela ROTA DE ESPECIALIDADE (Documentada)
-   * Útil se a rota direta do médico falhar.
-   */
   public async getSlotsBySpecialty(startDate: Date, days: number = 7) {
     if (!BASE_URL) return [];
     try {
@@ -126,8 +119,8 @@ class ClinicService {
         const params = new URLSearchParams({
             start_date: startStr,
             end_date: endStr,
-            specialty_cbo: SPECIALTY_CBO, // Necessário configurar no .env
-            health_insurance_id: "4" // Padrão 'Particular' ou similar
+            specialty_cbo: SPECIALTY_CBO,
+            health_insurance_id: "4" 
         });
 
         const url = `${BASE_URL}/api/v1/integration/facilities/${FACILITY_ID}/available-slots-by-specialty?${params.toString()}`;
@@ -141,7 +134,7 @@ class ClinicService {
     }
   }
 
-  // --- MÉTODOS ORIGINAIS ---
+  // --- MÉTODOS PRINCIPAIS ---
 
   public async upsertPatient(data: ClinicPatientData) {
     if (!BASE_URL) throw new Error("URL da API não configurada.");
@@ -208,6 +201,10 @@ class ClinicService {
       } catch (e) { return []; }
   }
 
+  /**
+   * Busca slots disponíveis.
+   * Tenta rota direta primeiro. Se falhar ou voltar vazio, tenta rota por especialidade.
+   */
   public async getAvailableSlots(startDate: Date, days: number = 7) {
     if (!BASE_URL) return [];
     try {
@@ -215,22 +212,63 @@ class ClinicService {
       const startStr = format(startDate, "yyyy-MM-dd");
       const endStr = format(addDays(startDate, days), "yyyy-MM-dd");
       
-      const url = `${BASE_URL}/api/v1/integration/facilities/${FACILITY_ID}/doctors/${DOCTOR_ID}/addresses/${ADDRESS_ID}/available-slots`;
+      // 1. TENTATIVA DIRETA (Médico + Endereço Específico)
+      const urlDirect = `${BASE_URL}/api/v1/integration/facilities/${FACILITY_ID}/doctors/${DOCTOR_ID}/addresses/${ADDRESS_ID}/available-slots`;
+      console.log(`📡 GET Direct: ${urlDirect}?start_date=${startStr}&end_date=${endStr}`);
 
-      console.log(`📡 GET Slots: ${url}?start_date=${startStr}&end_date=${endStr}`);
+      let items: string[] = [];
 
-      const response = await axios.get(url, {
-        headers: { 'Authorization': `Bearer ${token}` },
-        params: { start_date: startStr, end_date: endStr },
-      });
-
-      const rawItems = response.data.result?.items || [];
-      
-      if (rawItems.length === 0) {
-          console.warn(`⚠️ API retornou 0 slots. Verifique: ADDRESS_ID=${ADDRESS_ID}, DOCTOR_ID=${DOCTOR_ID} ou se a agenda de ${startStr} está aberta.`);
+      try {
+          const resDirect = await axios.get(urlDirect, {
+            headers: { 'Authorization': `Bearer ${token}` },
+            params: { start_date: startStr, end_date: endStr },
+          });
+          items = resDirect.data.result?.items || [];
+      } catch (err) {
+          console.warn("⚠️ Falha na rota direta, tentando fallback...");
       }
 
-      return rawItems.map((isoString: string) => ({
+      // 2. FALLBACK: Tenta buscar por ESPECIALIDADE se a direta vier vazia
+      // (Isso resolve se o ADDRESS_ID estiver errado no .env)
+      if (items.length === 0) {
+          console.log(`🔄 Tentando Fallback por Especialidade (CBO: ${SPECIALTY_CBO})...`);
+          const urlSpec = `${BASE_URL}/api/v1/integration/facilities/${FACILITY_ID}/available-slots-by-specialty`;
+          
+          const resSpec = await axios.get(urlSpec, {
+              headers: { 'Authorization': `Bearer ${token}` },
+              params: { 
+                  start_date: startStr, 
+                  end_date: endStr,
+                  specialty_cbo: SPECIALTY_CBO,
+                  health_insurance_id: "4" 
+              }
+          });
+
+          const result = resSpec.data.result;
+          
+          // O formato de resposta da especialidade pode variar
+          if (Array.isArray(result?.items)) {
+             // Formato simples
+             items = result.items;
+          } else if (Array.isArray(result?.doctors)) {
+             // Formato aninhado: varre os médicos e extrai slots
+             result.doctors.forEach((doc: any) => {
+                 // Verifica se é o nosso médico ou pega todos
+                 if (doc.available_slots && Array.isArray(doc.available_slots)) {
+                     items.push(...doc.available_slots);
+                 } else if (doc.slots && Array.isArray(doc.slots)) {
+                     items.push(...doc.slots);
+                 }
+             });
+          }
+      }
+
+      console.log(`✅ Clinic Total Slots: ${items.length} encontrados.`);
+
+      // Remove duplicatas e formata
+      const uniqueItems = Array.from(new Set(items));
+
+      return uniqueItems.map((isoString: string) => ({
         id: `clinic-free-${isoString}`, 
         startTime: new Date(isoString),
         endTime: addMinutes(new Date(isoString), 30),
@@ -240,28 +278,23 @@ class ClinicService {
       }));
 
     } catch (error: any) {
-      console.error(`❌ Erro Slots:`, error.message);
+      console.error(`❌ Erro Fatal Slots:`, error.message);
       return [];
     }
   }
 
   public async getBookings(startDate: Date, days: number = 7) {
     if (!BASE_URL) return [];
-
     try {
       const token = await this.getAccessToken();
       const startStr = format(startDate, "yyyy-MM-dd");
       const endStr = format(addDays(startDate, days), "yyyy-MM-dd");
-
       const url = `${BASE_URL}/api/v1/integration/facilities/${FACILITY_ID}/doctors/${DOCTOR_ID}/addresses/${ADDRESS_ID}/bookings`;
-
       const response = await axios.get(url, {
         headers: { 'Authorization': `Bearer ${token}` },
         params: { start_date: startStr, end_date: endStr },
       });
-
       const items = response.data.result?.items || [];
-
       return items.map((booking: any) => ({
         id: `clinic-booked-${booking.id}`,
         startTime: booking.start ? new Date(booking.start) : new Date(`${booking.date}T${booking.start_time}`),
@@ -270,7 +303,6 @@ class ClinicService {
         source: 'CLINIC' as const,
         details: booking.client || booking.patient?.name || "Paciente Agendado"
       }));
-
     } catch (error: any) {
       console.error("❌ Erro Clinic Bookings:", error.response?.data || error.message);
       return [];
@@ -283,15 +315,14 @@ class ClinicService {
         const token = await this.getAccessToken();
         const endDate = addMinutes(date, 30);
         const url = `${BASE_URL}/api/v1/integration/facilities/${FACILITY_ID}/doctors/${DOCTOR_ID}/addresses/${ADDRESS_ID}/bookings`;
-
         const payload = {
             start_date: format(date, "yyyy-MM-dd HH:mm:ss"),
             end_date: format(endDate, "yyyy-MM-dd HH:mm:ss"),
             note: "Agendado via Silvia (Encaixe Já)",
             patient: {
-            name: patient.name,
-            mobile_phone: formatMobileLegacy(patient.phone),
-            birth_date: patient.birthDate ? format(patient.birthDate, "yyyy-MM-dd") : null
+                name: patient.name,
+                mobile_phone: formatMobileLegacy(patient.phone),
+                birth_date: patient.birthDate ? format(patient.birthDate, "yyyy-MM-dd") : null
             }
         };
         const response = await axios.post(url, payload, {
