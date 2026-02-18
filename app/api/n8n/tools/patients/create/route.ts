@@ -3,7 +3,7 @@ import { prisma } from '@/lib/prisma';
 import { clinicService } from '@/lib/clinic'; // Integração Clinic
 import { z } from 'zod';
 
-// Schema flexível: aceita userId (do N8N) ou managerId (do Frontend)
+// Schema Inteligente: Aceita userId OU managerId
 const CreateSchema = z.object({
   userId: z.string().cuid().optional(),
   managerId: z.string().cuid().optional(),
@@ -15,7 +15,7 @@ const CreateSchema = z.object({
   cpf: z.string().optional(),
   birthDate: z.coerce.date().optional(), 
 }).refine(data => data.userId || data.managerId, {
-  message: "userId ou managerId é obrigatório",
+  message: "É necessário enviar userId ou managerId",
   path: ["userId"]
 });
 
@@ -29,9 +29,10 @@ export async function POST(req: Request) {
   try {
     const body = await req.json();
     
-    // 2. Validação (Resolve o erro "Missing fields")
+    // 2. Validação e Normalização
     const data = CreateSchema.parse(body);
-    const managerId = data.userId || data.managerId!; // Garante que temos um ID
+    // Usa userId se vier (N8N), senão usa managerId
+    const managerId = data.userId || data.managerId!; 
 
     // 3. Verificar Plano para Integração Clinic
     const manager = await prisma.user.findUnique({
@@ -98,7 +99,7 @@ export async function POST(req: Request) {
 
   } catch (error: any) {
     console.error("Erro Create Patient:", error);
-    // Retorna erro amigável se for do Zod, senão o erro genérico
+    // Retorna erro amigável se for do Zod
     const msg = error.issues ? error.issues[0].message : (error.message || 'Erro ao criar paciente');
     return NextResponse.json({ error: msg }, { status: 400 });
   }
