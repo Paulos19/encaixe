@@ -19,6 +19,7 @@ import {
   Headset,
   X,
   CalendarRange,
+  Database,
 } from "lucide-react";
 
 // --- ÍCONE WHATSAPP (SVG Otimizado) ---
@@ -43,6 +44,7 @@ const menuItems = [
   { title: "Chat", href: "/chat", icon: Headset, roles: ["MANAGER"] },
   { title: "Assinatura", href: "/dashboard/settings/billing", icon: Settings, roles: ["MANAGER"] },
   { title: "Agenda", href: "/dashboard/agenda", icon: CalendarRange, roles: ["MANAGER"] },
+  { title: "Backup de Dados", href: "/dashboard/backup", icon: Database, roles: ["ADMIN"] },
   { title: "Gestão de Clientes", href: "/admin/tenants", icon: BarChart3, roles: ["ADMIN"] },
   { title: "Logs do Sistema", href: "/admin/logs", icon: ShieldAlert, roles: ["ADMIN"] },
 ];
